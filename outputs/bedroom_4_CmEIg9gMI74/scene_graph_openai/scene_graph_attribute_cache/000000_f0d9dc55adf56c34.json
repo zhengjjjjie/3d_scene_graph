@@ -1,0 +1,56 @@
+{
+    "request": {
+        "schema_version": 1,
+        "base_url": "https://www.autodl.art/api/v1",
+        "model": "gpt-5.5",
+        "prompt_sha256": "21dba8c7e985db7a9b44f4d42983ab09ee52d9328db5a2a27aee6525a2e589d6",
+        "input_sha256": "9786954da834772ca9e8f6cf2f0e70a14f36d7ba30b7e836ee8d3df56f69f3db",
+        "input": {
+            "node": {
+                "id": 0,
+                "bbox_extent": [
+                    2.0,
+                    1.5,
+                    0.1
+                ],
+                "bbox_center": [
+                    3.4,
+                    -1.8,
+                    3.3
+                ],
+                "possible_tags": [
+                    "ceiling",
+                    "ceiling section",
+                    "room corner",
+                    "wall-ceiling junction"
+                ],
+                "object_tag": "ceiling",
+                "caption": "a smooth white ceiling section at a room corner with angled edges"
+            },
+            "caption_entry": {
+                "id": 0,
+                "captions": [
+                    "A white ceiling section with a flat surface and angled edge.",
+                    "A light-colored flat ceiling section with sharp angular room-corner edges.",
+                    "A smooth white ceiling section meeting at a room corner.",
+                    "A smooth white ceiling section with angled edges at a room corner."
+                ],
+                "low_confidences": [
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            }
+        }
+    },
+    "result": {
+        "property": [
+            "FLAT_SURFACE",
+            "SMOOTH_SURFACE",
+            "ANGLED_EDGES"
+        ],
+        "state": []
+    },
+    "raw_response": "{\"property\":[\"FLAT_SURFACE\",\"SMOOTH_SURFACE\",\"ANGLED_EDGES\"],\"state\":[]}"
+}

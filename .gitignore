@@ -176,3 +176,8 @@ cfslam/tmp.bash
 cfslam/wandb
 cfslam/tmp.png
 cfslam/temp.json
+
+# Local datasets and reconstruction results
+/bedroom_4_CmEIg9gMI74/
+/colmap_workspace/
+/colmap_workspace==/

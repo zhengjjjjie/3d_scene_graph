@@ -1,0 +1,52 @@
+{
+    "id": 10,
+    "bbox_extent": [
+        2.204,
+        0.921,
+        0.103
+    ],
+    "bbox_center": [
+        0.658,
+        0.85,
+        3.027
+    ],
+    "captions": [
+        "A dark, flat floor mat with an irregular trapezoidal shape and slightly uneven edges.",
+        "A dark rectangular floor rug with a contrasting border.",
+        "A section of hardwood flooring with reddish-brown planks and a glossy finish.",
+        "A brown hardwood floor section with visible plank seams and a smooth glossy finish."
+    ],
+    "response": "{\"summary\": \"a dark floor mat or rug on hardwood flooring\", \"possible_tags\": [\"floor mat\", \"rug\", \"hardwood floor\", \"flooring\"], \"object_tag\": \"floor mat\"}",
+    "_request": {
+        "settings": {
+            "schema_version": 2,
+            "provider": "openai-compatible-responses",
+            "base_url": "https://www.autodl.art/api/v1",
+            "model": "gpt-5.5",
+            "prompt_sha256": "a77f6bb60405bc3d1988a1fc20ce5d38480651f04358e070ab7ee1bb912e318e",
+            "caption_file": "/data2/zhengjie/code/concept-graphs/outputs/bedroom_4_CmEIg9gMI74/scene_graph_openai/cfslam_openai_captions.json",
+            "caption_file_sha256": "7d4181427f116e0d91170e0461caa5dc804f1f75a149dd5eaf0c7eb36dafc542",
+            "mapfile": "/data2/zhengjie/data/concept_graphs/outputs/bedroom_4_CmEIg9gMI74/pcd_saves/full_pcd_sam3_clip_overlap_maskconf0.95_simsum1.2_dbscan.1_sam3_clip_post.pkl.gz",
+            "mapfile_sha256": "e491360241e04aac4cff296277346badd2030847e57bd7841cc0eae07735ad15"
+        },
+        "input": {
+            "id": 10,
+            "bbox_extent": [
+                2.204,
+                0.921,
+                0.103
+            ],
+            "bbox_center": [
+                0.658,
+                0.85,
+                3.027
+            ],
+            "captions": [
+                "A dark, flat floor mat with an irregular trapezoidal shape and slightly uneven edges.",
+                "A dark rectangular floor rug with a contrasting border.",
+                "A section of hardwood flooring with reddish-brown planks and a glossy finish.",
+                "A brown hardwood floor section with visible plank seams and a smooth glossy finish."
+            ]
+        }
+    }
+}

@@ -1,0 +1,60 @@
+{
+    "request": {
+        "schema_version": 1,
+        "base_url": "https://www.autodl.art/api/v1",
+        "model": "gpt-5.5",
+        "prompt_sha256": "21dba8c7e985db7a9b44f4d42983ab09ee52d9328db5a2a27aee6525a2e589d6",
+        "input_sha256": "b34c50865d58751d512454d307e51f6e0c51e09d8e4af9a18c068eaee5883e35",
+        "input": {
+            "node": {
+                "id": 4,
+                "bbox_extent": [
+                    2.2,
+                    2.0,
+                    0.2
+                ],
+                "bbox_center": [
+                    4.2,
+                    -0.6,
+                    3.1
+                ],
+                "possible_tags": [
+                    "window",
+                    "blinds",
+                    "window frame",
+                    "trim"
+                ],
+                "object_tag": "window",
+                "caption": "a large rectangular window with white trim, divided panes, and closed horizontal blinds"
+            },
+            "caption_entry": {
+                "id": 4,
+                "captions": [
+                    "A rectangular window with white trim, divided panes, and closed horizontal blinds.",
+                    "A large rectangular window with a white frame, grid panes, and partially closed horizontal blinds.",
+                    "A large rectangular window with white trim, divided panes, and closed horizontal blinds.",
+                    "A large rectangular window with white trim, divided panes, and closed horizontal blinds."
+                ],
+                "low_confidences": [
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            }
+        }
+    },
+    "result": {
+        "property": [
+            "RECTANGULAR",
+            "PANED",
+            "FRAMED",
+            "LIGHT_ADMITTING",
+            "VIEW_PROVIDING"
+        ],
+        "state": [
+            "COVERED"
+        ]
+    },
+    "raw_response": "{\"property\":[\"RECTANGULAR\",\"PANED\",\"FRAMED\",\"LIGHT_ADMITTING\",\"VIEW_PROVIDING\"],\"state\":[\"COVERED\"]}"
+}

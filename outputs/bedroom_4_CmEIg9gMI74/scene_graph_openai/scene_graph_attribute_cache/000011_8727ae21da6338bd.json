@@ -1,0 +1,64 @@
+{
+    "request": {
+        "schema_version": 1,
+        "base_url": "https://www.autodl.art/api/v1",
+        "model": "gpt-5.5",
+        "prompt_sha256": "21dba8c7e985db7a9b44f4d42983ab09ee52d9328db5a2a27aee6525a2e589d6",
+        "input_sha256": "3bb38033550e92de21923219b9615124469c612151776cf68a5c8ecbf5464dda",
+        "input": {
+            "node": {
+                "id": 11,
+                "bbox_extent": [
+                    1.8,
+                    0.9,
+                    0.1
+                ],
+                "bbox_center": [
+                    2.2,
+                    0.3,
+                    2.0
+                ],
+                "possible_tags": [
+                    "bedspread",
+                    "comforter",
+                    "quilt",
+                    "blanket",
+                    "bed",
+                    "rug"
+                ],
+                "object_tag": "bedspread",
+                "caption": "a beige quilted bedspread or comforter with subtle floral patterns draped over a bed"
+            },
+            "caption_entry": {
+                "id": 11,
+                "captions": [
+                    "A beige quilted bedspread with subtle floral patterns and a textured fabric surface.",
+                    "A bed with a light quilted comforter and a textured gray blanket spread across it.",
+                    "A beige shaggy rug with a rectangular shape and mottled darker patches.",
+                    "A beige floral-patterned quilt is draped over the bed."
+                ],
+                "low_confidences": [
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            }
+        }
+    },
+    "result": {
+        "property": [
+            "QUILTED",
+            "TEXTURED",
+            "FLORAL_PATTERNED",
+            "SOFT",
+            "FLEXIBLE",
+            "INSULATING"
+        ],
+        "state": [
+            "DRAPED",
+            "SPREAD_OUT"
+        ]
+    },
+    "raw_response": "{\"property\":[\"QUILTED\",\"TEXTURED\",\"FLORAL_PATTERNED\",\"SOFT\",\"FLEXIBLE\",\"INSULATING\"],\"state\":[\"DRAPED\",\"SPREAD_OUT\"]}"
+}

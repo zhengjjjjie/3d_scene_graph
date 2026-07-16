@@ -1,0 +1,58 @@
+{
+    "request": {
+        "schema_version": 1,
+        "base_url": "https://www.autodl.art/api/v1",
+        "model": "gpt-5.5",
+        "prompt_sha256": "21dba8c7e985db7a9b44f4d42983ab09ee52d9328db5a2a27aee6525a2e589d6",
+        "input_sha256": "b616b173568c77502bc7077b8b375ea8c439efe5f96a85456b24a702f076b5de",
+        "input": {
+            "node": {
+                "id": 7,
+                "bbox_extent": [
+                    0.9,
+                    0.8,
+                    0.1
+                ],
+                "bbox_center": [
+                    1.8,
+                    -1.3,
+                    3.9
+                ],
+                "possible_tags": [
+                    "wall picture",
+                    "wall art",
+                    "decorative panel",
+                    "framed picture",
+                    "paper"
+                ],
+                "object_tag": "wall art",
+                "caption": "a framed wall picture or decorative wall art panel with a pale beige surface and dark markings"
+            },
+            "caption_entry": {
+                "id": 7,
+                "captions": [
+                    "A white rectangular sheet of paper with faint markings and slightly uneven edges.",
+                    "A square decorative wall art panel with a light beige surface and dark brown floral branch design.",
+                    "A square wall picture with a pale surface and dark abstract markings.",
+                    "A rectangular framed wall picture with a pale beige background and a faint dark sketch."
+                ],
+                "low_confidences": [
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            }
+        }
+    },
+    "result": {
+        "property": [
+            "DECORATIVE",
+            "FLAT",
+            "FRAMED",
+            "PATTERNED"
+        ],
+        "state": []
+    },
+    "raw_response": "{\"property\":[\"DECORATIVE\",\"FLAT\",\"FRAMED\",\"PATTERNED\"],\"state\":[]}"
+}

@@ -1,0 +1,34 @@
+{
+    "state": "complete",
+    "complete": true,
+    "settings": {
+        "schema_version": 2,
+        "provider": "openai-compatible-responses",
+        "base_url": "https://www.autodl.art/api/v1",
+        "model": "gpt-5.5",
+        "prompt_sha256": "a77f6bb60405bc3d1988a1fc20ce5d38480651f04358e070ab7ee1bb912e318e",
+        "caption_file": "/data2/zhengjie/code/concept-graphs/outputs/bedroom_4_CmEIg9gMI74/scene_graph_openai/cfslam_openai_captions.json",
+        "caption_file_sha256": "7d4181427f116e0d91170e0461caa5dc804f1f75a149dd5eaf0c7eb36dafc542",
+        "mapfile": "/data2/zhengjie/data/concept_graphs/outputs/bedroom_4_CmEIg9gMI74/pcd_saves/full_pcd_sam3_clip_overlap_maskconf0.95_simsum1.2_dbscan.1_sam3_clip_post.pkl.gz",
+        "mapfile_sha256": "e491360241e04aac4cff296277346badd2030847e57bd7841cc0eae07735ad15"
+    },
+    "num_scene_objects": 13,
+    "processed_object_ids": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+    ],
+    "api_requests_this_run": 13,
+    "cache_hits_this_run": 0,
+    "invalid_object_count": 0
+}

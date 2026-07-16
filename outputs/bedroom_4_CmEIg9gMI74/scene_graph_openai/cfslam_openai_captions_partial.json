@@ -1,0 +1,197 @@
+[
+    {
+        "id": 0,
+        "captions": [
+            "A white ceiling section with a flat surface and angled edge.",
+            "A light-colored flat ceiling section with sharp angular room-corner edges.",
+            "A smooth white ceiling section meeting at a room corner.",
+            "A smooth white ceiling section with angled edges at a room corner."
+        ],
+        "low_confidences": [
+            false,
+            false,
+            false,
+            false
+        ]
+    },
+    {
+        "id": 1,
+        "captions": [
+            "A polished reddish-brown hardwood floor with visible plank seams and a glossy finish.",
+            "A polished hardwood floor with reddish-brown planks and glossy reflections.",
+            "A polished hardwood floor with reddish-brown planks and glossy reflections.",
+            "A glossy reddish-brown hardwood floor with visible plank seams."
+        ],
+        "low_confidences": [
+            false,
+            false,
+            false,
+            false
+        ]
+    },
+    {
+        "id": 2,
+        "captions": [
+            "A plain beige interior door with a flat rectangular surface and minimal visible detailing.",
+            "A plain beige door panel with a flat rectangular surface and smooth edges.",
+            "A plain beige interior door with a tall rectangular shape and smooth flat surface.",
+            "A plain beige door panel with a tall rectangular shape and smooth flat surface."
+        ],
+        "low_confidences": [
+            false,
+            false,
+            false,
+            false
+        ]
+    },
+    {
+        "id": 3,
+        "captions": [
+            "A rectangular window with white horizontal blinds and a white frame.",
+            "A rectangular window with white horizontal blinds and visible grid panes.",
+            "A tall rectangular window with white trim and closed horizontal blinds.",
+            "A narrow rectangular window with a white frame and closed horizontal blinds."
+        ],
+        "low_confidences": [
+            false,
+            false,
+            false,
+            false
+        ]
+    },
+    {
+        "id": 4,
+        "captions": [
+            "A rectangular window with white trim, divided panes, and closed horizontal blinds.",
+            "A large rectangular window with a white frame, grid panes, and partially closed horizontal blinds.",
+            "A large rectangular window with white trim, divided panes, and closed horizontal blinds.",
+            "A large rectangular window with white trim, divided panes, and closed horizontal blinds."
+        ],
+        "low_confidences": [
+            false,
+            false,
+            false,
+            false
+        ]
+    },
+    {
+        "id": 5,
+        "captions": [
+            "A white square throw pillow with rounded edges and a soft, slightly bulging shape.",
+            "A light gray square throw pillow with soft fabric and slightly rounded edges.",
+            "A light gray square cushion with soft fabric, rounded corners, and slightly uneven edges.",
+            "A white rectangular cushion with soft rounded corners and a smooth fabric surface."
+        ],
+        "low_confidences": [
+            false,
+            false,
+            false,
+            false
+        ]
+    },
+    {
+        "id": 6,
+        "captions": [
+            "A square white ventilation grille with diagonal slats and a decorative patterned face.",
+            "A floral wall decoration with dark branching stems and pale leaves or blossoms.",
+            "A rectangular framed wall art print with a light background and dark leafy branch pattern.",
+            "A beige floral wall decoration with clustered leaf- or petal-like shapes."
+        ],
+        "low_confidences": [
+            false,
+            false,
+            false,
+            false
+        ]
+    },
+    {
+        "id": 7,
+        "captions": [
+            "A white rectangular sheet of paper with faint markings and slightly uneven edges.",
+            "A square decorative wall art panel with a light beige surface and dark brown floral branch design.",
+            "A square wall picture with a pale surface and dark abstract markings.",
+            "A rectangular framed wall picture with a pale beige background and a faint dark sketch."
+        ],
+        "low_confidences": [
+            false,
+            false,
+            false,
+            false
+        ]
+    },
+    {
+        "id": 8,
+        "captions": [
+            "A square beige throw pillow with a brown floral embroidered pattern.",
+            "A beige square throw pillow with a darker ornate floral pattern in the center.",
+            "A beige square throw pillow with a floral patterned center and soft fabric edges.",
+            "A framed wall art piece with a light beige surface and faint floral design."
+        ],
+        "low_confidences": [
+            false,
+            false,
+            false,
+            false
+        ]
+    },
+    {
+        "id": 9,
+        "captions": [
+            "A light gray upholstered sofa cushion with soft fabric, rounded edges, and slight creases.",
+            "A light gray upholstered sofa cushion with soft fabric texture and rounded edges.",
+            "A light gray decorative throw pillow with a subtle floral pattern and soft fabric texture.",
+            "A light blue square throw pillow with soft, slightly wrinkled fabric."
+        ],
+        "low_confidences": [
+            false,
+            false,
+            false,
+            false
+        ]
+    },
+    {
+        "id": 10,
+        "captions": [
+            "A dark, flat floor mat with an irregular trapezoidal shape and slightly uneven edges.",
+            "A dark rectangular floor rug with a contrasting border.",
+            "A section of hardwood flooring with reddish-brown planks and a glossy finish.",
+            "A brown hardwood floor section with visible plank seams and a smooth glossy finish."
+        ],
+        "low_confidences": [
+            false,
+            false,
+            false,
+            false
+        ]
+    },
+    {
+        "id": 11,
+        "captions": [
+            "A beige quilted bedspread with subtle floral patterns and a textured fabric surface.",
+            "A bed with a light quilted comforter and a textured gray blanket spread across it.",
+            "A beige shaggy rug with a rectangular shape and mottled darker patches.",
+            "A beige floral-patterned quilt is draped over the bed."
+        ],
+        "low_confidences": [
+            false,
+            false,
+            false,
+            false
+        ]
+    },
+    {
+        "id": 12,
+        "captions": [
+            "A plain beige interior wall with a smooth matte surface and a vertical corner edge.",
+            "A plain beige wall with a white electrical outlet and baseboard trim.",
+            "A beige interior wall section with a white electrical outlet and a white baseboard along the bottom.",
+            "A beige interior wall section with a white electrical outlet and white baseboard trim."
+        ],
+        "low_confidences": [
+            false,
+            false,
+            false,
+            false
+        ]
+    }
+]

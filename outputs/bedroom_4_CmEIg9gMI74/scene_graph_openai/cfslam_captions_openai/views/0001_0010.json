@@ -1,0 +1,31 @@
+{
+    "request": {
+        "object_id": 1,
+        "detection_index": 10,
+        "image_path": "/data2/zhengjie/data/concept_graphs/outputs/bedroom_4_CmEIg9gMI74/results/frame000009.jpg",
+        "image_size": 68606,
+        "image_mtime_ns": 1784120225593487611,
+        "xyxy": [
+            0.0,
+            191.0,
+            518.0,
+            294.0
+        ],
+        "padding": 50,
+        "mask_area": 28434,
+        "mapfile": "/data2/zhengjie/data/concept_graphs/outputs/bedroom_4_CmEIg9gMI74/pcd_saves/full_pcd_sam3_clip_overlap_maskconf0.95_simsum1.2_dbscan.1_sam3_clip_post.pkl.gz",
+        "mapfile_size": 2432576,
+        "mapfile_mtime_ns": 1784121524929376491,
+        "mapfile_sha256": "e491360241e04aac4cff296277346badd2030847e57bd7841cc0eae07735ad15",
+        "provider": "openai-compatible-responses",
+        "base_url": "https://www.autodl.art/api/v1",
+        "model": "gpt-5.5",
+        "image_detail": "high",
+        "image_max_size": 1024,
+        "jpeg_quality": 90,
+        "masking_option": "red_outline",
+        "image_payload_sha256": "8fdb2d5ea6ca759dc7b9d0d6ad10ceb327b5ea143abd7e9a6f5b1caa3578009b",
+        "caption_prompt_sha256": "cde2a358bffc9607e8827d83ae3e364f3b4c48f6901ca47d5c1a99660626461b"
+    },
+    "caption": "A polished hardwood floor with reddish-brown planks and glossy reflections."
+}

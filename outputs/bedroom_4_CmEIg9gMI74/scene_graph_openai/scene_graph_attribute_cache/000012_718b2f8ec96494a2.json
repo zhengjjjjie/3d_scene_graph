@@ -1,0 +1,56 @@
+{
+    "request": {
+        "schema_version": 1,
+        "base_url": "https://www.autodl.art/api/v1",
+        "model": "gpt-5.5",
+        "prompt_sha256": "21dba8c7e985db7a9b44f4d42983ab09ee52d9328db5a2a27aee6525a2e589d6",
+        "input_sha256": "f8f8b24fc287fbf6613143815683817aa6d5f4c35cafed1c843c049a76d8c497",
+        "input": {
+            "node": {
+                "id": 12,
+                "bbox_extent": [
+                    2.8,
+                    2.1,
+                    0.1
+                ],
+                "bbox_center": [
+                    0.4,
+                    -0.4,
+                    3.1
+                ],
+                "possible_tags": [
+                    "wall",
+                    "electrical outlet",
+                    "baseboard",
+                    "trim"
+                ],
+                "object_tag": "wall",
+                "caption": "a beige interior wall with a white electrical outlet and baseboard trim"
+            },
+            "caption_entry": {
+                "id": 12,
+                "captions": [
+                    "A plain beige interior wall with a smooth matte surface and a vertical corner edge.",
+                    "A plain beige wall with a white electrical outlet and baseboard trim.",
+                    "A beige interior wall section with a white electrical outlet and a white baseboard along the bottom.",
+                    "A beige interior wall section with a white electrical outlet and white baseboard trim."
+                ],
+                "low_confidences": [
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            }
+        }
+    },
+    "result": {
+        "property": [
+            "SMOOTH_SURFACE",
+            "MATTE_FINISH",
+            "INTERIOR_SURFACE"
+        ],
+        "state": []
+    },
+    "raw_response": "{\"property\":[\"SMOOTH_SURFACE\",\"MATTE_FINISH\",\"INTERIOR_SURFACE\"],\"state\":[]}"
+}

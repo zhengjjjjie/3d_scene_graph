@@ -1,0 +1,60 @@
+{
+    "request": {
+        "schema_version": 1,
+        "base_url": "https://www.autodl.art/api/v1",
+        "model": "gpt-5.5",
+        "prompt_sha256": "21dba8c7e985db7a9b44f4d42983ab09ee52d9328db5a2a27aee6525a2e589d6",
+        "input_sha256": "0cce5d0fc65f48b215c5e4aed20086d0c22080569819c6094fa634e54e57ac5c",
+        "input": {
+            "node": {
+                "id": 3,
+                "bbox_extent": [
+                    1.9,
+                    1.1,
+                    0.3
+                ],
+                "bbox_center": [
+                    4.2,
+                    -0.4,
+                    1.2
+                ],
+                "possible_tags": [
+                    "window",
+                    "blinds",
+                    "horizontal blinds",
+                    "window frame",
+                    "white frame"
+                ],
+                "object_tag": "window",
+                "caption": "a rectangular window with a white frame and closed horizontal blinds"
+            },
+            "caption_entry": {
+                "id": 3,
+                "captions": [
+                    "A rectangular window with white horizontal blinds and a white frame.",
+                    "A rectangular window with white horizontal blinds and visible grid panes.",
+                    "A tall rectangular window with white trim and closed horizontal blinds.",
+                    "A narrow rectangular window with a white frame and closed horizontal blinds."
+                ],
+                "low_confidences": [
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            }
+        }
+    },
+    "result": {
+        "property": [
+            "RECTANGULAR",
+            "FRAMED",
+            "PANED",
+            "LIGHT_ADMITTING"
+        ],
+        "state": [
+            "CLOSED"
+        ]
+    },
+    "raw_response": "{\"property\":[\"RECTANGULAR\",\"FRAMED\",\"PANED\",\"LIGHT_ADMITTING\"],\"state\":[\"CLOSED\"]}"
+}

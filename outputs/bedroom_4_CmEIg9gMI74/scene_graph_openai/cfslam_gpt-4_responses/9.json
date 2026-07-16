@@ -1,0 +1,52 @@
+{
+    "id": 9,
+    "bbox_extent": [
+        0.855,
+        0.763,
+        0.189
+    ],
+    "bbox_center": [
+        2.585,
+        -0.195,
+        3.367
+    ],
+    "captions": [
+        "A light gray upholstered sofa cushion with soft fabric, rounded edges, and slight creases.",
+        "A light gray upholstered sofa cushion with soft fabric texture and rounded edges.",
+        "A light gray decorative throw pillow with a subtle floral pattern and soft fabric texture.",
+        "A light blue square throw pillow with soft, slightly wrinkled fabric."
+    ],
+    "response": "{\"summary\": \"a light gray or light blue upholstered sofa cushion or throw pillow\", \"possible_tags\": [\"sofa cushion\", \"throw pillow\", \"pillow\", \"cushion\", \"upholstery\"], \"object_tag\": \"throw pillow\"}",
+    "_request": {
+        "settings": {
+            "schema_version": 2,
+            "provider": "openai-compatible-responses",
+            "base_url": "https://www.autodl.art/api/v1",
+            "model": "gpt-5.5",
+            "prompt_sha256": "a77f6bb60405bc3d1988a1fc20ce5d38480651f04358e070ab7ee1bb912e318e",
+            "caption_file": "/data2/zhengjie/code/concept-graphs/outputs/bedroom_4_CmEIg9gMI74/scene_graph_openai/cfslam_openai_captions.json",
+            "caption_file_sha256": "7d4181427f116e0d91170e0461caa5dc804f1f75a149dd5eaf0c7eb36dafc542",
+            "mapfile": "/data2/zhengjie/data/concept_graphs/outputs/bedroom_4_CmEIg9gMI74/pcd_saves/full_pcd_sam3_clip_overlap_maskconf0.95_simsum1.2_dbscan.1_sam3_clip_post.pkl.gz",
+            "mapfile_sha256": "e491360241e04aac4cff296277346badd2030847e57bd7841cc0eae07735ad15"
+        },
+        "input": {
+            "id": 9,
+            "bbox_extent": [
+                0.855,
+                0.763,
+                0.189
+            ],
+            "bbox_center": [
+                2.585,
+                -0.195,
+                3.367
+            ],
+            "captions": [
+                "A light gray upholstered sofa cushion with soft fabric, rounded edges, and slight creases.",
+                "A light gray upholstered sofa cushion with soft fabric texture and rounded edges.",
+                "A light gray decorative throw pillow with a subtle floral pattern and soft fabric texture.",
+                "A light blue square throw pillow with soft, slightly wrinkled fabric."
+            ]
+        }
+    }
+}

@@ -1,0 +1,136 @@
+{
+    "ceiling_0": {
+        "property": [
+            "FLAT_SURFACE",
+            "SMOOTH_SURFACE",
+            "ANGLED_EDGES"
+        ]
+    },
+    "hardwood_floor_1": {
+        "property": [
+            "WALKABLE",
+            "HARD",
+            "SMOOTH",
+            "GLOSSY"
+        ],
+        "state": [
+            "POLISHED"
+        ]
+    },
+    "door_2": {
+        "property": [
+            "OPENABLE",
+            "CLOSABLE",
+            "FLAT_SURFACED",
+            "SMOOTH_EDGED",
+            "RECTANGULAR",
+            "PLAIN"
+        ]
+    },
+    "window_3": {
+        "property": [
+            "RECTANGULAR",
+            "FRAMED",
+            "PANED",
+            "LIGHT_ADMITTING"
+        ],
+        "state": [
+            "CLOSED"
+        ]
+    },
+    "window_4": {
+        "property": [
+            "RECTANGULAR",
+            "PANED",
+            "FRAMED",
+            "LIGHT_ADMITTING",
+            "VIEW_PROVIDING"
+        ],
+        "state": [
+            "COVERED"
+        ]
+    },
+    "throw_pillow_5": {
+        "property": [
+            "SOFT",
+            "CUSHIONED",
+            "FABRIC",
+            "ROUNDED_EDGES",
+            "SQUARE_SHAPE",
+            "SMOOTH_SURFACE"
+        ]
+    },
+    "wall_art_6": {
+        "property": [
+            "DECORATIVE",
+            "FRAMED",
+            "PATTERNED",
+            "FLORAL_PATTERN",
+            "LEAFY_PATTERN",
+            "RECTANGULAR"
+        ]
+    },
+    "wall_art_7": {
+        "property": [
+            "DECORATIVE",
+            "FLAT",
+            "FRAMED",
+            "PATTERNED"
+        ]
+    },
+    "throw_pillow_8": {
+        "property": [
+            "SQUARE",
+            "FLORAL_PATTERNED",
+            "SOFT",
+            "CUSHIONED",
+            "DECORATIVE"
+        ]
+    },
+    "throw_pillow_9": {
+        "property": [
+            "SOFT",
+            "FABRIC_TEXTURE",
+            "ROUNDED_EDGES",
+            "DECORATIVE",
+            "PATTERNED"
+        ],
+        "state": [
+            "SLIGHTLY_WRINKLED",
+            "CREASED"
+        ],
+        "relation": [
+            "ON throw_pillow_5"
+        ]
+    },
+    "floor_mat_10": {
+        "property": [
+            "FLAT",
+            "LOW_PROFILE",
+            "HAS_BORDER",
+            "UNEVEN_EDGES",
+            "WALKABLE"
+        ]
+    },
+    "bedspread_11": {
+        "property": [
+            "QUILTED",
+            "TEXTURED",
+            "FLORAL_PATTERNED",
+            "SOFT",
+            "FLEXIBLE",
+            "INSULATING"
+        ],
+        "state": [
+            "DRAPED",
+            "SPREAD_OUT"
+        ]
+    },
+    "wall_12": {
+        "property": [
+            "SMOOTH_SURFACE",
+            "MATTE_FINISH",
+            "INTERIOR_SURFACE"
+        ]
+    }
+}

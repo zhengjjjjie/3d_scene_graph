@@ -1,0 +1,58 @@
+{
+    "request": {
+        "schema_version": 1,
+        "base_url": "https://www.autodl.art/api/v1",
+        "model": "gpt-5.5",
+        "prompt_sha256": "21dba8c7e985db7a9b44f4d42983ab09ee52d9328db5a2a27aee6525a2e589d6",
+        "input_sha256": "226ca3aa49ad92fcb40e6aadc826cac3685f20941bb91bb38df897302e0f433c",
+        "input": {
+            "node": {
+                "id": 2,
+                "bbox_extent": [
+                    1.0,
+                    0.8,
+                    0.1
+                ],
+                "bbox_center": [
+                    0.2,
+                    0.2,
+                    1.1
+                ],
+                "possible_tags": [
+                    "door",
+                    "interior door",
+                    "door panel"
+                ],
+                "object_tag": "door",
+                "caption": "a plain beige interior door with a flat rectangular panel"
+            },
+            "caption_entry": {
+                "id": 2,
+                "captions": [
+                    "A plain beige interior door with a flat rectangular surface and minimal visible detailing.",
+                    "A plain beige door panel with a flat rectangular surface and smooth edges.",
+                    "A plain beige interior door with a tall rectangular shape and smooth flat surface.",
+                    "A plain beige door panel with a tall rectangular shape and smooth flat surface."
+                ],
+                "low_confidences": [
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            }
+        }
+    },
+    "result": {
+        "property": [
+            "OPENABLE",
+            "CLOSABLE",
+            "FLAT_SURFACED",
+            "SMOOTH_EDGED",
+            "RECTANGULAR",
+            "PLAIN"
+        ],
+        "state": []
+    },
+    "raw_response": "{\"property\":[\"OPENABLE\",\"CLOSABLE\",\"FLAT_SURFACED\",\"SMOOTH_EDGED\",\"RECTANGULAR\",\"PLAIN\"],\"state\":[]}"
+}

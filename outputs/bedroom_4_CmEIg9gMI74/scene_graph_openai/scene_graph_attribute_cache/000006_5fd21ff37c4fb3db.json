@@ -1,0 +1,60 @@
+{
+    "request": {
+        "schema_version": 1,
+        "base_url": "https://www.autodl.art/api/v1",
+        "model": "gpt-5.5",
+        "prompt_sha256": "21dba8c7e985db7a9b44f4d42983ab09ee52d9328db5a2a27aee6525a2e589d6",
+        "input_sha256": "9ea62412134224345ac6c6a19ee7c37d3fcafdafa82b10b0dbbde32c92e2b2e7",
+        "input": {
+            "node": {
+                "id": 6,
+                "bbox_extent": [
+                    0.9,
+                    0.9,
+                    0.1
+                ],
+                "bbox_center": [
+                    2.6,
+                    -1.3,
+                    3.9
+                ],
+                "possible_tags": [
+                    "wall art",
+                    "framed print",
+                    "floral wall decoration",
+                    "wall decoration",
+                    "ventilation grille"
+                ],
+                "object_tag": "wall art",
+                "caption": "a rectangular floral wall decoration or framed wall art with a leafy branch pattern"
+            },
+            "caption_entry": {
+                "id": 6,
+                "captions": [
+                    "A square white ventilation grille with diagonal slats and a decorative patterned face.",
+                    "A floral wall decoration with dark branching stems and pale leaves or blossoms.",
+                    "A rectangular framed wall art print with a light background and dark leafy branch pattern.",
+                    "A beige floral wall decoration with clustered leaf- or petal-like shapes."
+                ],
+                "low_confidences": [
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            }
+        }
+    },
+    "result": {
+        "property": [
+            "DECORATIVE",
+            "FRAMED",
+            "PATTERNED",
+            "FLORAL_PATTERN",
+            "LEAFY_PATTERN",
+            "RECTANGULAR"
+        ],
+        "state": []
+    },
+    "raw_response": "{\"property\":[\"DECORATIVE\",\"FRAMED\",\"PATTERNED\",\"FLORAL_PATTERN\",\"LEAFY_PATTERN\",\"RECTANGULAR\"],\"state\":[]}"
+}

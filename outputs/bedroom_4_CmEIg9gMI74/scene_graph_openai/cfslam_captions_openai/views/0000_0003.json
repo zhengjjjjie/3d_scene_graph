@@ -1,0 +1,31 @@
+{
+    "request": {
+        "object_id": 0,
+        "detection_index": 3,
+        "image_path": "/data2/zhengjie/data/concept_graphs/outputs/bedroom_4_CmEIg9gMI74/results/frame000003.jpg",
+        "image_size": 41981,
+        "image_mtime_ns": 1784120225337473540,
+        "xyxy": [
+            288.0,
+            0.0,
+            419.0,
+            30.0
+        ],
+        "padding": 26,
+        "mask_area": 2516,
+        "mapfile": "/data2/zhengjie/data/concept_graphs/outputs/bedroom_4_CmEIg9gMI74/pcd_saves/full_pcd_sam3_clip_overlap_maskconf0.95_simsum1.2_dbscan.1_sam3_clip_post.pkl.gz",
+        "mapfile_size": 2432576,
+        "mapfile_mtime_ns": 1784121524929376491,
+        "mapfile_sha256": "e491360241e04aac4cff296277346badd2030847e57bd7841cc0eae07735ad15",
+        "provider": "openai-compatible-responses",
+        "base_url": "https://www.autodl.art/api/v1",
+        "model": "gpt-5.5",
+        "image_detail": "high",
+        "image_max_size": 1024,
+        "jpeg_quality": 90,
+        "masking_option": "red_outline",
+        "image_payload_sha256": "a653123b755142fae100f02462a0854f1a685ac7985c05befd1e0a2fb09bdb1c",
+        "caption_prompt_sha256": "cde2a358bffc9607e8827d83ae3e364f3b4c48f6901ca47d5c1a99660626461b"
+    },
+    "caption": "A light-colored flat ceiling section with sharp angular room-corner edges."
+}

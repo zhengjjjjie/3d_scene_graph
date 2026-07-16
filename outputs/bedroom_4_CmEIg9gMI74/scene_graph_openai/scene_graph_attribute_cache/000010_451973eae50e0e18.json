@@ -1,0 +1,58 @@
+{
+    "request": {
+        "schema_version": 1,
+        "base_url": "https://www.autodl.art/api/v1",
+        "model": "gpt-5.5",
+        "prompt_sha256": "21dba8c7e985db7a9b44f4d42983ab09ee52d9328db5a2a27aee6525a2e589d6",
+        "input_sha256": "d075e5fe8c90b7338854189420c14abf6a23e038602bf2a3b82036757b25f4a0",
+        "input": {
+            "node": {
+                "id": 10,
+                "bbox_extent": [
+                    2.2,
+                    0.9,
+                    0.1
+                ],
+                "bbox_center": [
+                    0.7,
+                    0.8,
+                    3.0
+                ],
+                "possible_tags": [
+                    "floor mat",
+                    "rug",
+                    "hardwood floor",
+                    "flooring"
+                ],
+                "object_tag": "floor mat",
+                "caption": "a dark floor mat or rug on hardwood flooring"
+            },
+            "caption_entry": {
+                "id": 10,
+                "captions": [
+                    "A dark, flat floor mat with an irregular trapezoidal shape and slightly uneven edges.",
+                    "A dark rectangular floor rug with a contrasting border.",
+                    "A section of hardwood flooring with reddish-brown planks and a glossy finish.",
+                    "A brown hardwood floor section with visible plank seams and a smooth glossy finish."
+                ],
+                "low_confidences": [
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            }
+        }
+    },
+    "result": {
+        "property": [
+            "FLAT",
+            "LOW_PROFILE",
+            "HAS_BORDER",
+            "UNEVEN_EDGES",
+            "WALKABLE"
+        ],
+        "state": []
+    },
+    "raw_response": "{\"property\":[\"FLAT\",\"LOW_PROFILE\",\"HAS_BORDER\",\"UNEVEN_EDGES\",\"WALKABLE\"],\"state\":[]}"
+}

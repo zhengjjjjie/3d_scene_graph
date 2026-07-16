@@ -1,0 +1,62 @@
+{
+    "request": {
+        "schema_version": 1,
+        "base_url": "https://www.autodl.art/api/v1",
+        "model": "gpt-5.5",
+        "prompt_sha256": "21dba8c7e985db7a9b44f4d42983ab09ee52d9328db5a2a27aee6525a2e589d6",
+        "input_sha256": "030bbbc805b7e6b079a9ea80676a9a6f66498214f05e0996c7280ea7fd85939d",
+        "input": {
+            "node": {
+                "id": 9,
+                "bbox_extent": [
+                    0.9,
+                    0.8,
+                    0.2
+                ],
+                "bbox_center": [
+                    2.6,
+                    -0.2,
+                    3.4
+                ],
+                "possible_tags": [
+                    "sofa cushion",
+                    "throw pillow",
+                    "pillow",
+                    "cushion",
+                    "upholstery"
+                ],
+                "object_tag": "throw pillow",
+                "caption": "a light gray or light blue upholstered sofa cushion or throw pillow"
+            },
+            "caption_entry": {
+                "id": 9,
+                "captions": [
+                    "A light gray upholstered sofa cushion with soft fabric, rounded edges, and slight creases.",
+                    "A light gray upholstered sofa cushion with soft fabric texture and rounded edges.",
+                    "A light gray decorative throw pillow with a subtle floral pattern and soft fabric texture.",
+                    "A light blue square throw pillow with soft, slightly wrinkled fabric."
+                ],
+                "low_confidences": [
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            }
+        }
+    },
+    "result": {
+        "property": [
+            "SOFT",
+            "FABRIC_TEXTURE",
+            "ROUNDED_EDGES",
+            "DECORATIVE",
+            "PATTERNED"
+        ],
+        "state": [
+            "SLIGHTLY_WRINKLED",
+            "CREASED"
+        ]
+    },
+    "raw_response": "{\"property\":[\"SOFT\",\"FABRIC_TEXTURE\",\"ROUNDED_EDGES\",\"DECORATIVE\",\"PATTERNED\"],\"state\":[\"SLIGHTLY_WRINKLED\",\"CREASED\"]}"
+}

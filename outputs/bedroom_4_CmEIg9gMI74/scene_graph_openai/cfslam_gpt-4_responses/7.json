@@ -1,0 +1,52 @@
+{
+    "id": 7,
+    "bbox_extent": [
+        0.876,
+        0.818,
+        0.091
+    ],
+    "bbox_center": [
+        1.849,
+        -1.272,
+        3.856
+    ],
+    "captions": [
+        "A white rectangular sheet of paper with faint markings and slightly uneven edges.",
+        "A square decorative wall art panel with a light beige surface and dark brown floral branch design.",
+        "A square wall picture with a pale surface and dark abstract markings.",
+        "A rectangular framed wall picture with a pale beige background and a faint dark sketch."
+    ],
+    "response": "{\"summary\": \"a framed wall picture or decorative wall art panel with a pale beige surface and dark markings\", \"possible_tags\": [\"wall picture\", \"wall art\", \"decorative panel\", \"framed picture\", \"paper\"], \"object_tag\": \"wall art\"}",
+    "_request": {
+        "settings": {
+            "schema_version": 2,
+            "provider": "openai-compatible-responses",
+            "base_url": "https://www.autodl.art/api/v1",
+            "model": "gpt-5.5",
+            "prompt_sha256": "a77f6bb60405bc3d1988a1fc20ce5d38480651f04358e070ab7ee1bb912e318e",
+            "caption_file": "/data2/zhengjie/code/concept-graphs/outputs/bedroom_4_CmEIg9gMI74/scene_graph_openai/cfslam_openai_captions.json",
+            "caption_file_sha256": "7d4181427f116e0d91170e0461caa5dc804f1f75a149dd5eaf0c7eb36dafc542",
+            "mapfile": "/data2/zhengjie/data/concept_graphs/outputs/bedroom_4_CmEIg9gMI74/pcd_saves/full_pcd_sam3_clip_overlap_maskconf0.95_simsum1.2_dbscan.1_sam3_clip_post.pkl.gz",
+            "mapfile_sha256": "e491360241e04aac4cff296277346badd2030847e57bd7841cc0eae07735ad15"
+        },
+        "input": {
+            "id": 7,
+            "bbox_extent": [
+                0.876,
+                0.818,
+                0.091
+            ],
+            "bbox_center": [
+                1.849,
+                -1.272,
+                3.856
+            ],
+            "captions": [
+                "A white rectangular sheet of paper with faint markings and slightly uneven edges.",
+                "A square decorative wall art panel with a light beige surface and dark brown floral branch design.",
+                "A square wall picture with a pale surface and dark abstract markings.",
+                "A rectangular framed wall picture with a pale beige background and a faint dark sketch."
+            ]
+        }
+    }
+}
