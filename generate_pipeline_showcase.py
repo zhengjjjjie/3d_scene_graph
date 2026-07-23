@@ -7,6 +7,7 @@ and derived visual assets. It performs no inference and makes no network calls.
 
 from __future__ import annotations
 
+import argparse
 import base64
 import gzip
 import html
@@ -27,8 +28,10 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parent
 SCENE_ID = "bedroom_4_CmEIg9gMI74"
-DERIVED = Path("/data2/zhengjie/data/concept_graphs/outputs") / SCENE_ID
-FINAL = ROOT / "outputs" / SCENE_ID / "scene_graph_openai"
+RUN_NAME = SCENE_ID
+DERIVED_ROOT = Path("/data2/zhengjie/data/concept_graphs/outputs")
+DERIVED = DERIVED_ROOT / SCENE_ID
+FINAL = ROOT / "outputs" / RUN_NAME / "scene_graph_openai"
 OUTPUT = ROOT / "pipeline_showcase.html"
 MAPPING_PACKAGES = Path("/data2/zhengjie/data/concept_graphs/python_packages/mapping_py311")
 if MAPPING_PACKAGES.is_dir() and str(MAPPING_PACKAGES) not in sys.path:
@@ -79,24 +82,23 @@ def colorized_depth_data_url(path: Path) -> tuple[str, float, float]:
     return pil_data_url(Image.fromarray(colored), quality=94), low, high
 
 
-def caption_crop_data_urls() -> list[dict]:
-    """Reconstruct the four exact red-outline crops selected for object 5."""
-    map_path = DERIVED / "pcd_saves" / (
-        "full_pcd_sam3_clip_overlap_maskconf0.95_simsum1.2_dbscan.1_"
-        "sam3_clip_post.pkl.gz"
-    )
+def caption_crop_data_urls(object_id: int, map_path: Path) -> list[dict]:
+    """Reconstruct the exact red-outline crops selected for one example object."""
     with gzip.open(map_path, "rb") as handle:
         payload = pickle.load(handle)
     objects = payload["objects"] if isinstance(payload, dict) else payload
-    obj = objects[5]
-    object_cache = read_json(FINAL / "cfslam_captions_openai" / "5.json")
+    obj = objects[object_id]
+    object_cache = read_json(FINAL / "cfslam_captions_openai" / f"{object_id}.json")
     captions = object_cache["entry"]["captions"]
     selected = object_cache["selected_detection_indices"]
     result = []
 
     for slot, idx_det in enumerate(selected):
         view_cache = read_json(
-            FINAL / "cfslam_captions_openai" / "views" / f"0005_{idx_det:04d}.json"
+            FINAL
+            / "cfslam_captions_openai"
+            / "views"
+            / f"{object_id:04d}_{idx_det:04d}.json"
         )
         request = view_cache["request"]
         with Image.open(request["image_path"]) as source:
@@ -129,6 +131,72 @@ def caption_crop_data_urls() -> list[dict]:
 
 def svg_escape(value: str) -> str:
     return html.escape(value, quote=True)
+
+
+def node_key(node: dict) -> str:
+    return f'{node["object_tag"].replace(" ", "_")}_{node["id"]}'
+
+
+def relation_edges(relation_queries: list[dict]) -> list[dict]:
+    """Convert model decisions into directed final edges for visualization."""
+    relation_specs = {
+        "a on b": ("object1", "object2", "ON"),
+        "b on a": ("object2", "object1", "ON"),
+        "a in b": ("object1", "object2", "INSIDE"),
+        "b in a": ("object2", "object1", "INSIDE"),
+    }
+    edges = []
+    for query in relation_queries:
+        relation = str(query.get("object_relation", "")).strip().lower()
+        if relation not in relation_specs:
+            continue
+        source_name, target_name, label = relation_specs[relation]
+        source = query[source_name]
+        target = query[target_name]
+        edges.append(
+            {
+                "source": int(source["id"]),
+                "target": int(target["id"]),
+                "source_key": node_key(source),
+                "target_key": node_key(target),
+                "label": label,
+            }
+        )
+    return edges
+
+
+def relation_cards_html(relation_queries: list[dict]) -> str:
+    cards = []
+    for query in relation_queries:
+        first = query["object1"]
+        second = query["object2"]
+        relation = str(query.get("object_relation", "none of these")).strip().lower()
+        kept = relation != "none of these"
+        decision = relation.upper().replace("NONE OF THESE", "NONE")
+        pair = f"{node_key(first)} ↔ {node_key(second)}"
+        reason = str(query.get("reason", "No reason was returned."))
+        cards.append(
+            '<article class="candidate"><div class="candidate-head">'
+            f'<code>{html.escape(pair)}</code>'
+            f'<span class="decision {"keep" if kept else "none"}">{html.escape(decision)}</span>'
+            f'</div><p>{html.escape(reason)}</p></article>'
+        )
+    return "".join(cards)
+
+
+def refinement_example_html(node: dict, captions: list[str]) -> str:
+    caption_lines = "<br>".join(f"“{html.escape(value)}”" for value in captions)
+    tags = "".join(
+        f'<span class="tag">{html.escape(tag)}</span>' for tag in node["possible_tags"][:4]
+    )
+    return (
+        '<div class="semantic-transform"><div class="semantic-box">'
+        f'<span>INPUT · {len(captions)} VIEW CAPTIONS</span><p>{caption_lines}</p></div>'
+        '<div class="transform-arrow">→</div><div class="semantic-box">'
+        '<span>OUTPUT · REFINED NODE</span>'
+        f'<p><b>{html.escape(node["object_tag"])} · ID {node["id"]}</b><br>'
+        f'{html.escape(node["caption"])}</p><div class="tag-row">{tags}</div></div></div>'
+    )
 
 
 def trajectory_svg(traj_path: Path) -> str:
@@ -211,18 +279,21 @@ def mask_chart_svg(counts: list[int]) -> str:
 
 
 def category_for(node: dict) -> str:
-    return "structure" if node["id"] in {0, 1, 2, 3, 4, 12} else "object"
+    tag = node["object_tag"].strip().lower()
+    structural_terms = ("ceiling", "floor", "wall", "window", "door")
+    return "structure" if any(term in tag for term in structural_terms) else "object"
 
 
 def node_color(node: dict) -> str:
-    if node["id"] in {0, 1, 2, 3, 4, 12}:
+    if category_for(node) == "structure":
         return "#168c8c"
-    if node["id"] in {5, 8, 9, 11}:
+    tag = node["object_tag"].strip().lower()
+    if any(term in tag for term in ("pillow", "cushion", "bedspread", "blanket")):
         return "#6c5ce7"
     return "#d9852b"
 
 
-def topdown_svg(nodes: list[dict]) -> str:
+def topdown_svg(nodes: list[dict], edges: list[dict]) -> str:
     width, height = 760, 450
     left, right, top, bottom = 58, 48, 52, 56
     centers = np.asarray([[node["bbox_center"][0], node["bbox_center"][2]] for node in nodes])
@@ -237,9 +308,16 @@ def topdown_svg(nodes: list[dict]) -> str:
         return float(px), float(py)
 
     positions = {node["id"]: project(node) for node in nodes}
-    x9, y9 = positions[9]
-    x5, y5 = positions[5]
-    arrow = f'<path d="M{x9:.1f} {y9:.1f} L{x5:.1f} {y5:.1f}" stroke="#26324a" stroke-width="3" marker-end="url(#topArrow)"/><text x="{(x9+x5)/2:.1f}" y="{(y9+y5)/2-8:.1f}" text-anchor="middle" class="svg-edge">ON</text>'
+    arrows = []
+    for edge in edges:
+        x1, y1 = positions[edge["source"]]
+        x2, y2 = positions[edge["target"]]
+        arrows.append(
+            f'<path d="M{x1:.1f} {y1:.1f} L{x2:.1f} {y2:.1f}" stroke="#26324a" '
+            f'stroke-width="3" marker-end="url(#topArrow)"/>'
+            f'<text x="{(x1+x2)/2:.1f}" y="{(y1+y2)/2-8:.1f}" '
+            f'text-anchor="middle" class="svg-edge">{svg_escape(edge["label"])}</text>'
+        )
     node_svg = []
     # Fixed label offsets reduce collisions among the pillow/art clusters.
     offsets = {3: (-10, -14), 4: (0, -17), 5: (-22, 24), 6: (0, -17), 7: (-12, 27), 8: (-36, -16), 9: (18, 27), 12: (8, -15)}
@@ -258,14 +336,14 @@ def topdown_svg(nodes: list[dict]) -> str:
       <defs><marker id="topArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10z" fill="#26324a"/></marker></defs>
       <rect x="1" y="1" width="758" height="448" rx="18" fill="#fbfcfe" stroke="#dfe5eb"/>
       <g stroke="#e1e6eb" stroke-width="1" stroke-dasharray="3 7"><path d="M58 100 H712 M58 200 H712 M58 300 H712"/><path d="M180 52 V394 M360 52 V394 M540 52 V394"/></g>
-      {arrow}
+      {''.join(arrows)}
       {''.join(node_svg)}
       <text x="26" y="28" class="svg-caption">world X / Z · bbox centers (m)</text>
       <text x="695" y="425" class="svg-caption">X →</text><text x="18" y="75" class="svg-caption">Z ↑</text>
     </svg>"""
 
 
-def semantic_graph_svg(nodes: list[dict]) -> str:
+def semantic_graph_svg(nodes: list[dict], edges: list[dict]) -> str:
     positions = {
         0: (90, 74), 1: (245, 74), 2: (400, 74), 3: (555, 74), 4: (710, 74), 6: (865, 74),
         9: (325, 258), 5: (645, 258),
@@ -274,7 +352,7 @@ def semantic_graph_svg(nodes: list[dict]) -> str:
     parts = []
     for node in nodes:
         x, y = positions[node["id"]]
-        key = f'{node["object_tag"].replace(" ", "_")}_{node["id"]}'
+        key = node_key(node)
         color = node_color(node)
         width = 140
         parts.append(
@@ -285,14 +363,34 @@ def semantic_graph_svg(nodes: list[dict]) -> str:
             f'<text x="18" y="44" class="svg-node-id">ID {node["id"]:02d}</text>'
             f'<title>{svg_escape(node["caption"])}</title></g>'
         )
+    edge_parts = []
+    for index, edge in enumerate(edges):
+        source_x, source_y = positions[edge["source"]]
+        target_x, target_y = positions[edge["target"]]
+        dx, dy = target_x - source_x, target_y - source_y
+        distance = max(math.hypot(dx, dy), 1.0)
+        start_x = source_x + dx / distance * 78
+        start_y = source_y + dy / distance * 38
+        end_x = target_x - dx / distance * 78
+        end_y = target_y - dy / distance * 38
+        middle_x = (start_x + end_x) / 2
+        middle_y = (start_y + end_y) / 2 - 42 - 12 * index
+        label_width = max(66, 18 + 8 * len(edge["label"]))
+        edge_parts.append(
+            f'<path d="M{start_x:.1f} {start_y:.1f} Q{middle_x:.1f} {middle_y:.1f} '
+            f'{end_x:.1f} {end_y:.1f}" fill="none" stroke="#168c64" stroke-width="4" '
+            f'marker-end="url(#semArrow)"/>'
+            f'<rect x="{middle_x-label_width/2:.1f}" y="{middle_y-17:.1f}" width="{label_width:.1f}" '
+            f'height="30" rx="15" fill="#168c64"/>'
+            f'<text x="{middle_x:.1f}" y="{middle_y+3:.1f}" text-anchor="middle" '
+            f'class="svg-edge-invert">{svg_escape(edge["label"])}</text>'
+        )
+    relation_word = "关系" if len(edges) != 1 else "关系"
     return f"""
-    <svg class="semantic-svg" viewBox="0 0 960 520" role="img" aria-label="最终稀疏 Scene Graph，13 个节点和 1 条 ON 关系">
+    <svg class="semantic-svg" viewBox="0 0 960 520" role="img" aria-label="最终稀疏 Scene Graph，{len(nodes)} 个节点和 {len(edges)} 条{relation_word}">
       <defs><marker id="semArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#168c64"/></marker></defs>
       <rect x="1" y="1" width="958" height="518" rx="22" fill="#f7faf9" stroke="#dce8e3"/>
-      <path d="M402 258 C470 214 500 214 568 258" fill="none" stroke="#168c64" stroke-width="4" marker-end="url(#semArrow)"/>
-      <rect x="447" y="207" width="66" height="30" rx="15" fill="#168c64"/>
-      <text x="480" y="227" text-anchor="middle" class="svg-edge-invert">ON</text>
-      <text x="480" y="170" text-anchor="middle" class="svg-caption">唯一保留的语义边</text>
+      {''.join(edge_parts)}
       {''.join(parts)}
       <text x="24" y="502" class="svg-caption">实线箭头 = 最终输出关系 · 其余节点保留为无边的稀疏节点</text>
     </svg>"""
@@ -315,13 +413,13 @@ def node_buttons_html(node_data: list[dict]) -> str:
     return "".join(buttons)
 
 
-def caption_views_html(views: list[dict]) -> str:
+def caption_views_html(views: list[dict], object_id: int) -> str:
     items = []
     for index, view in enumerate(views, 1):
         items.append(
             f"""<article class="caption-view">
-              <button class="image-button" data-lightbox-src="{view['image']}" aria-label="放大视角 {index}">
-                <img src="{view['image']}" alt="object 5 的第 {index} 个红色轮廓视角" loading="lazy">
+              <button class="image-button" type="button" data-lightbox-src="{view['image']}" aria-label="放大视角 {index}">
+                <img src="{view['image']}" alt="object {object_id} 的第 {index} 个红色轮廓视角" loading="lazy">
               </button>
               <div class="caption-view-meta"><span>VIEW {index} · {html.escape(view['frame'])}</span><span>conf {view['confidence']:.3f}</span></div>
               <p>{html.escape(view['caption'])}</p>
@@ -330,16 +428,24 @@ def caption_views_html(views: list[dict]) -> str:
     return "".join(items)
 
 
-def stage_nav_html() -> str:
+def stage_nav_html(
+    *,
+    node_count: int,
+    caption_count: int,
+    candidate_count: int,
+    edge_count: int,
+    property_count: int,
+    state_count: int,
+) -> str:
     stages = [
         ("00", "RGB 输入", "31 frames", "geometry"),
         ("01", "几何恢复", "depth · K · pose", "geometry"),
         ("02", "2D 观察", "SAM3 · CLIP", "perception"),
-        ("03", "3D 融合", "13 objects", "perception"),
-        ("04", "视觉 Caption", "52 views", "language"),
-        ("05", "节点精炼", "13 tags", "language"),
-        ("06", "关系推理", "2 → 1 edge", "language"),
-        ("07", "属性/状态", "62 + 7", "language"),
+        ("03", "3D 融合", f"{node_count} objects", "perception"),
+        ("04", "视觉 Caption", f"{caption_count} views", "language"),
+        ("05", "节点精炼", f"{node_count} tags", "language"),
+        ("06", "关系推理", f"{candidate_count} → {edge_count} edge", "language"),
+        ("07", "属性/状态", f"{property_count} + {state_count}", "language"),
         ("08", "稀疏格式", "JSON · PASS", "result"),
     ]
     return "".join(
@@ -360,18 +466,30 @@ def build() -> Path:
     graph = read_json(FINAL / "scene_graph.json")
     captions = read_json(FINAL / "cfslam_openai_captions.json")
     relation_queries = read_json(FINAL / "cfslam_object_relations.json")
+    edges = relation_edges(relation_queries)
 
     counts = [int(frame["count"]) for frame in detections["frames"]]
     valid_ratios = [float(frame["valid_ratio"]) for frame in geometry["frames"]]
     global_depth_min = min(float(frame["depth_min_m"]) for frame in geometry["frames"])
     global_depth_max = max(float(frame["depth_max_m"]) for frame in geometry["frames"])
     property_count = sum(len(value.get("property", [])) for value in graph.values())
+    property_node_count = sum(bool(value.get("property")) for value in graph.values())
     state_count = sum(len(value.get("state", [])) for value in graph.values())
     state_node_count = sum(bool(value.get("state")) for value in graph.values())
+    caption_count = sum(len(entry.get("captions", [])) for entry in captions)
+    node_count = len(nodes)
+    candidate_count = len(relation_queries)
+    edge_count = len(edges)
+
+    caption_requests = int(captions_manifest.get("api_requests_this_run", caption_count))
+    refinement_requests = int(refinement_manifest.get("api_requests_this_run", node_count))
+    attribute_requests = int(attributes_manifest.get("api_requests_this_run", node_count))
+    formal_request_count = caption_requests + refinement_requests + candidate_count + attribute_requests
+    model_name = str(captions_manifest.get("settings", {}).get("model", "configured model"))
 
     node_data = []
     for node in nodes:
-        key = f'{node["object_tag"].replace(" ", "_")}_{node["id"]}'
+        key = node_key(node)
         value = graph[key]
         node_data.append(
             {
@@ -393,11 +511,36 @@ def build() -> Path:
     depth_url, depth_p2, depth_p98 = colorized_depth_data_url(
         DERIVED / "results" / "depth000027.png"
     )
-    caption_views = caption_crop_data_urls()
+    example_id = edges[0]["target"] if edges else int(nodes[0]["id"])
+    example_node = next(node for node in nodes if int(node["id"]) == example_id)
+    example_captions = next(
+        entry["captions"] for entry in captions if int(entry["id"]) == example_id
+    )
+    map_path = Path(captions_manifest["settings"]["mapfile"])
+    caption_views = caption_crop_data_urls(example_id, map_path)
+    refinement_example = refinement_example_html(example_node, example_captions)
+    relation_cards = relation_cards_html(relation_queries)
+    final_edge_text = ", ".join(
+        f'{edge["source_key"]} {edge["label"]} {edge["target_key"]}' for edge in edges
+    ) or "no emitted relation"
+    attribute_key = "bedspread_11" if "bedspread_11" in graph else next(
+        (key for key, value in graph.items() if value.get("state")), next(iter(graph))
+    )
+    attribute_example = html.escape(
+        json.dumps({attribute_key: graph[attribute_key]}, ensure_ascii=False, indent=2)
+    )
     raw_json = json.dumps(graph, ensure_ascii=False, indent=2)
     node_json = json.dumps(node_data, ensure_ascii=False).replace("</", "<\\/")
     graph_json = json.dumps(graph, ensure_ascii=False).replace("</", "<\\/")
     relation_json = json.dumps(relation_queries, ensure_ascii=False).replace("</", "<\\/")
+
+    expected_keys = {node_key(node) for node in nodes}
+    if set(graph) != expected_keys:
+        raise ValueError("scene_graph.json keys do not match scene_graph_nodes.json")
+    if int(format_manifest.get("node_count", node_count)) != node_count:
+        raise ValueError("Formatter manifest node count does not match final nodes")
+    if int(format_manifest.get("output_relation_count", edge_count)) != edge_count:
+        raise ValueError("Formatter manifest relation count does not match final edges")
 
     template = Template(r'''<!doctype html>
 <html lang="zh-CN">
@@ -405,7 +548,7 @@ def build() -> Path:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <title>ConceptGraphs Pipeline Showcase · bedroom_4</title>
+  <title>ConceptGraphs Pipeline Showcase · $RUN_NAME</title>
   <style>
     :root {
       --ink: #172033;
@@ -521,6 +664,7 @@ def build() -> Path:
     .image-tag { position: absolute; left: 10px; top: 10px; padding: 5px 8px; color: white; border: 1px solid rgba(255,255,255,.22); background: rgba(16,25,39,.66); backdrop-filter: blur(8px); border-radius: 8px; font: 750 10px/1 monospace; }
     figcaption { margin-top: 9px; color: var(--muted); font-size: 11px; }
     .image-button { width: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; display: block; }
+    button:focus-visible, a:focus-visible, [role="button"]:focus-visible { outline: 3px solid #f0a04b; outline-offset: 3px; }
     .triptych { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
     .media-card { padding: 10px 10px 13px; border: 1px solid var(--line); border-radius: 17px; background: white; }
     .media-card h4 { margin: 10px 3px 0; font-size: 13px; }
@@ -696,6 +840,10 @@ def build() -> Path:
       .hero-media { min-height: 350px; }
       .json-pre { max-height: none; }
     }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+    }
   </style>
 </head>
 <body id="top">
@@ -713,10 +861,10 @@ def build() -> Path:
       <div class="container">
         <div class="hero-grid">
           <div class="hero-copy">
-            <p class="eyebrow">Verified run · 2026-07-16 · svpp</p>
+            <p class="eyebrow">Verified baseline run · $RUN_NAME · svpp</p>
             <h1>从 RGB 视频到<br><span class="accent">3D Scene Graph</span></h1>
             <p class="lead">31 张单目 RGB 帧经过多视图几何恢复、SAM3 类别无关分割、CLIP 表征、三维对象融合与视觉语言推理，最终生成可追溯的稀疏场景图。本页中的数量、图片、节点和关系均来自当前实际产物。</p>
-            <div class="hero-badges"><span class="tiny-pill">scene · bedroom_4_CmEIg9gMI74</span><span class="tiny-pill">MapAnything</span><span class="tiny-pill">SAM3 + CLIP ViT-B/16</span><span class="tiny-pill">OpenAI-compatible Responses</span><span class="tiny-pill">self-contained HTML</span></div>
+            <div class="hero-badges"><span class="tiny-pill">scene · $SCENE_ID</span><span class="tiny-pill">run · $RUN_NAME</span><span class="tiny-pill">MapAnything</span><span class="tiny-pill">SAM3 + CLIP ViT-B/16</span><span class="tiny-pill">OpenAI-compatible Responses</span><span class="tiny-pill">self-contained HTML</span></div>
           </div>
           <figure class="hero-media">
             <img src="$HERO_IMAGE" alt="输入视频的代表性卧室 RGB 帧">
@@ -727,9 +875,9 @@ def build() -> Path:
           <div class="kpi"><strong>31</strong><span>RGB frames<br><small>1280 × 720</small></span></div>
           <div class="kpi"><strong>414</strong><span>SAM3 masks<br><small>6–19 / frame</small></span></div>
           <div class="kpi"><strong>60,675</strong><span>post-map points<br><small>13 objects</small></span></div>
-          <div class="kpi"><strong>52</strong><span>visual captions<br><small>4 views / object</small></span></div>
-          <div class="kpi"><strong>80</strong><span>formal API calls<br><small>+ 1 smoke test</small></span></div>
-          <div class="kpi"><strong>1</strong><span>final relation<br><small>validation PASS</small></span></div>
+          <div class="kpi"><strong>$CAPTION_COUNT</strong><span>visual captions<br><small>4 views / object</small></span></div>
+          <div class="kpi"><strong>$FORMAL_REQUEST_COUNT</strong><span>formal API calls<br><small>+ 1 smoke test</small></span></div>
+          <div class="kpi"><strong>$RELATION_COUNT</strong><span>final relation<br><small>validation PASS</small></span></div>
         </div>
       </div>
     </section>
@@ -738,7 +886,7 @@ def build() -> Path:
       <div class="container">
         <div class="section-head"><span class="section-no">System overview</span><h2>端到端数据流</h2><p>流程分为几何、视觉感知、语言推理和稀疏格式化四层。点击任一步骤可跳转到它的真实输入、方法与输出。</p></div>
         <div class="card flow-card"><div class="flow">$STAGE_NAV</div><div class="legend"><span><i style="background:var(--geometry)"></i>几何恢复</span><span><i style="background:var(--perception)"></i>视觉感知 / 3D Mapping</span><span><i style="background:var(--language)"></i>视觉语言语义</span><span><i style="background:var(--result)"></i>最终格式</span></div></div>
-        <div class="truth-note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg><div><b>结果口径：</b>正式链路共 80 次真实 Responses 请求（52 caption + 13 refinement + 2 relation + 13 attributes），另有 1 次独立视觉 smoke test。旧的 offline/enriched top-down 图不作为当前最终关系图；下方 Scene Graph 由本次 <code>scene_graph.json</code> 重新绘制。</div></div>
+        <div class="truth-note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg><div><b>结果口径：</b>正式链路共 $FORMAL_REQUEST_COUNT 次真实 Responses 请求（$CAPTION_REQUESTS caption + $REFINEMENT_REQUESTS refinement + $CANDIDATE_COUNT relation + $ATTRIBUTE_REQUESTS attributes），另有 1 次独立视觉 smoke test。上游几何与对象 map 由同场景已有产物复用；节点语义、关系和最终 JSON 均读取本次 baseline 目录。旧的 offline/enriched top-down 图不作为最终关系图。</div></div>
       </div>
     </section>
 
@@ -760,26 +908,23 @@ def build() -> Path:
       </section>
 
       <section id="stage-04" class="stage language">
-        <div class="container"><article class="card stage-shell"><div class="stage-top"><div class="stage-index"><strong>04</strong><span>vision caption</span></div><div class="stage-copy"><h3>OpenAI-compatible 视觉端点：多视角对象 Caption</h3><p>每个对象从全部 observation 中选择最多 4 个时间分散、质量最高的视角；动态 padding 后用红色轮廓标出目标，以 Base64 JPEG 通过 Responses API 输入模型 ID <code>gpt-5.5</code>。视觉请求已真实成功，但兼容端点的后端厂商身份不由产物推断。</p><div class="io-grid"><div class="io-box"><div class="io-label">Input <span>post-map</span></div><strong>13 objects · 192 observations</strong><p>过滤无效 bbox、过小 mask 和低 fill ratio；同帧去重。</p></div><div class="io-box method"><div class="io-label">Method <span>vision</span></div><strong>4 temporal bins → best quality / bin</strong><p>quality = confidence × mask area；red outline；detail=high；store=false。</p></div><div class="io-box"><div class="io-label">Output <span>JSON cache</span></div><strong>52 visual captions</strong><p>13 × 4 句；52 请求；0 cache hit；manifest complete。</p></div></div></div></div><div class="visual-block"><div class="visual-title"><b>真实选中视角的可视化重建 · object 5</b><span>红框 crop 由同一 map、bbox、mask 和 padding 重建；运行时 Base64 图片未落盘</span></div><div class="caption-grid">$CAPTION_VIEWS</div></div></article></div>
+        <div class="container"><article class="card stage-shell"><div class="stage-top"><div class="stage-index"><strong>04</strong><span>vision caption</span></div><div class="stage-copy"><h3>OpenAI-compatible 视觉端点：多视角对象 Caption</h3><p>每个对象从全部 observation 中选择最多 4 个时间分散、质量最高的视角；动态 padding 后用红色轮廓标出目标，以 Base64 JPEG 通过 Responses API 输入可配置模型 ID <code>$MODEL_NAME</code>。视觉请求已真实成功，但兼容端点的后端厂商身份不由产物推断。</p><div class="io-grid"><div class="io-box"><div class="io-label">Input <span>post-map</span></div><strong>$NODE_COUNT objects · 192 observations</strong><p>过滤无效 bbox、过小 mask 和低 fill ratio；同帧去重。</p></div><div class="io-box method"><div class="io-label">Method <span>vision</span></div><strong>4 temporal bins → best quality / bin</strong><p>quality = confidence × mask area；red outline；detail=high；store=false。</p></div><div class="io-box"><div class="io-label">Output <span>JSON cache</span></div><strong>$CAPTION_COUNT visual captions</strong><p>$CAPTION_REQUESTS 请求；manifest complete。</p></div></div></div></div><div class="visual-block"><div class="visual-title"><b>真实选中视角的可视化重建 · object $EXAMPLE_ID</b><span>红框 crop 由同一 map、bbox、mask 和 padding 重建；运行时 Base64 图片未落盘</span></div><div class="caption-grid">$CAPTION_VIEWS</div></div></article></div>
       </section>
 
       <section id="stage-05" class="stage language">
-        <div class="container"><article class="card stage-shell"><div class="stage-top"><div class="stage-index"><strong>05</strong><span>refinement</span></div><div class="stage-copy"><h3>多视角语义精炼与开放词汇节点命名</h3><p>原始 <code>GPTPrompt.py</code> 将同一对象的多句 caption 汇总为简洁描述、候选标签和唯一 object tag；保留原始 object ID，避免后续边错位。</p><div class="io-grid"><div class="io-box"><div class="io-label">Input <span>captions</span></div><strong>4 sentences / object</strong><p>视觉模型给出的互补视角描述。</p></div><div class="io-box method"><div class="io-label">Method <span>text LLM</span></div><strong>summary + possible_tags + object_tag</strong><p>通用 prompt；request identity 与 cache 防止旧模型/旧 map 混入。</p></div><div class="io-box"><div class="io-label">Output <span>13 nodes</span></div><strong>IDs 0…12 · invalid = 0</strong><p>13 请求；输出 detailed node JSON 和 pruned map。</p></div></div></div></div><div class="visual-block"><div class="visual-title"><b>object 5 的语义收敛</b><span>多描述 → 单节点</span></div><div class="semantic-transform"><div class="semantic-box"><span>INPUT · 4 VIEW CAPTIONS</span><p>“white square throw pillow…”<br>“light gray square throw pillow…”<br>“light gray square cushion…”<br>“white rectangular cushion…”</p></div><div class="transform-arrow">→</div><div class="semantic-box"><span>OUTPUT · REFINED NODE</span><p><b>throw pillow · ID 5</b><br>a light gray or white square throw pillow with rounded edges</p><div class="tag-row"><span class="tag">throw pillow</span><span class="tag">pillow</span><span class="tag">cushion</span></div></div></div></div></article></div>
+        <div class="container"><article class="card stage-shell"><div class="stage-top"><div class="stage-index"><strong>05</strong><span>refinement</span></div><div class="stage-copy"><h3>多视角语义精炼与开放词汇节点命名</h3><p>原始 <code>GPTPrompt.py</code> 将同一对象的多句 caption 汇总为简洁描述、候选标签和唯一 object tag；保留原始 object ID，避免后续边错位。</p><div class="io-grid"><div class="io-box"><div class="io-label">Input <span>captions</span></div><strong>4 sentences / object</strong><p>视觉模型给出的互补视角描述。</p></div><div class="io-box method"><div class="io-label">Method <span>text LLM</span></div><strong>summary + possible_tags + object_tag</strong><p>通用 prompt；request identity 与 cache 防止旧模型/旧 map 混入。</p></div><div class="io-box"><div class="io-label">Output <span>$NODE_COUNT nodes</span></div><strong>stable original IDs · invalid = 0</strong><p>$REFINEMENT_REQUESTS 请求；输出 detailed node JSON 和 pruned map。</p></div></div></div></div><div class="visual-block"><div class="visual-title"><b>object $EXAMPLE_ID 的语义收敛</b><span>多描述 → 单节点</span></div>$REFINEMENT_EXAMPLE</div></article></div>
       </section>
 
       <section id="stage-06" class="stage language">
-        <div class="container"><article class="card stage-shell"><div class="stage-top"><div class="stage-index"><strong>06</strong><span>relations</span></div><div class="stage-copy"><h3>几何候选图 + 受限空间关系推理</h3><p>先由对象点云的双向 overlap 建立稀疏候选图，再对连通分量取代价 <code>1−overlap</code> 的最小生成树。语言模型只在 <code>on / in / none</code> 受限词表内判定。</p><div class="io-grid"><div class="io-box"><div class="io-label">Input <span>objects</span></div><strong>13 point clouds + bbox + tags</strong><p>AABB 仅预筛；FAISS point overlap 保持原判据。</p></div><div class="io-box method"><div class="io-label">Method <span>graph + LLM</span></div><strong>components → MST → relation choice</strong><p>候选阈值 max directional overlap &gt; 0.01；关系方向与 ID 均显式校验。</p></div><div class="io-box"><div class="io-label">Output <span>edge pickle</span></div><strong>2 candidates → 1 edge</strong><p><code>throw_pillow_9 ON throw_pillow_5</code></p></div></div></div></div><div class="visual-block"><div class="visual-title"><b>候选判定审计</b><span>本次真实模型输出</span></div><div class="relation-candidates"><article class="candidate"><div class="candidate-head"><code>pillow_5 ↔ pillow_8</code><span class="decision none">NONE</span></div><p>同为 throw pillow，证据不足以描述一个位于另一个之上或内部，因此不保留边。</p></article><article class="candidate"><div class="candidate-head"><code>pillow_9 → pillow_5</code><span class="decision keep">B ON A</span></div><p>object 9 略高且水平位置重叠，与一个枕头搭在另一个枕头上的几何关系一致。</p></article></div></div></article></div>
+        <div class="container"><article class="card stage-shell"><div class="stage-top"><div class="stage-index"><strong>06</strong><span>relations</span></div><div class="stage-copy"><h3>ConceptGraphs baseline：几何候选图 + 受限空间关系推理</h3><p>保持原始代码行为：对每个 lower-index / higher-index 对只取单向 <code>overlap[i,j]</code>；超过 0.01 时把 overlap 原值直接写入邻接矩阵，再由 SciPy 对连通分量取 minimum spanning tree。语言模型只在 <code>on / in / none</code> 受限词表内判定。</p><div class="io-grid"><div class="io-box"><div class="io-label">Input <span>objects</span></div><strong>$NODE_COUNT point clouds + bbox + tags</strong><p>AABB 仅预筛；本地 FAISS 最近邻函数数值兼容原 overlap 判据，不宣称使用 GradSLAM 原始 import。</p></div><div class="io-box method"><div class="io-label">Method <span>official baseline behavior</span></div><strong>directional overlap → components → MST → LLM</strong><p><code>overlap[i,j] &gt; 0.01</code>；原始 similarity 直接作为 MST 权重；关系方向与 ID 显式校验。</p></div><div class="io-box"><div class="io-label">Output <span>edge pickle</span></div><strong>$CANDIDATE_COUNT candidates → $RELATION_COUNT edge</strong><p><code>$FINAL_EDGE_TEXT</code></p></div></div></div></div><div class="visual-block"><div class="visual-title"><b>候选判定审计</b><span>本次真实模型输出 · reason 原文</span></div><div class="relation-candidates">$RELATION_CARDS</div></div></article></div>
       </section>
 
       <section id="stage-07" class="stage language">
-        <div class="container"><article class="card stage-shell"><div class="stage-top"><div class="stage-index"><strong>07</strong><span>attributes</span></div><div class="stage-copy"><h3>通用 Property / State 抽取</h3><p>外部 prompt 从 detailed node 和原始多视角 captions 中抽取可展示的属性与状态。Python 只做 schema、枚举格式和 ID 校验，不包含 bedroom 或物体类别硬编码。</p><div class="io-grid"><div class="io-box"><div class="io-label">Input <span>semantic</span></div><strong>13 nodes + 52 captions</strong><p>对象标签、汇总描述与多视角证据。</p></div><div class="io-box method"><div class="io-label">Method <span>external prompt</span></div><strong>generic property/state extraction</strong><p>输出 uppercase tokens；空数组在最终 sparse dict 中省略。</p></div><div class="io-box"><div class="io-label">Output <span>JSON</span></div><strong>$PROPERTY_COUNT properties · $STATE_COUNT states</strong><p>13 请求；13/13 completed；0 cache hit。</p></div></div></div></div><div class="visual-block"><div class="attribute-stats"><div class="attribute-stat"><strong>13</strong><span>nodes with property</span></div><div class="attribute-stat"><strong>$PROPERTY_COUNT</strong><span>property tokens</span></div><div class="attribute-stat"><strong>$STATE_NODE_COUNT</strong><span>nodes with state</span></div><div class="attribute-stat"><strong>$STATE_COUNT</strong><span>state tokens</span></div></div><pre class="schema-card"><span class="key">"bedspread_11"</span>: {
-  <span class="key">"property"</span>: [<span class="value">"QUILTED"</span>, <span class="value">"TEXTURED"</span>, <span class="value">"FLORAL_PATTERNED"</span>, <span class="value">"SOFT"</span>, …],
-  <span class="key">"state"</span>: [<span class="value">"DRAPED"</span>, <span class="value">"SPREAD_OUT"</span>]
-}</pre></div></article></div>
+        <div class="container"><article class="card stage-shell"><div class="stage-top"><div class="stage-index"><strong>07</strong><span>attributes</span></div><div class="stage-copy"><h3>通用 Property / State 抽取</h3><p>外部 prompt 从 detailed node 和原始多视角 captions 中抽取可展示的属性与状态。Python 只做 schema、枚举格式和 ID 校验，不包含 bedroom 或物体类别硬编码。</p><div class="io-grid"><div class="io-box"><div class="io-label">Input <span>semantic</span></div><strong>$NODE_COUNT nodes + $CAPTION_COUNT captions</strong><p>对象标签、汇总描述与多视角证据。</p></div><div class="io-box method"><div class="io-label">Method <span>external prompt</span></div><strong>generic property/state extraction</strong><p>输出 uppercase tokens；空数组在最终 sparse dict 中省略。</p></div><div class="io-box"><div class="io-label">Output <span>JSON</span></div><strong>$PROPERTY_COUNT properties · $STATE_COUNT states</strong><p>$ATTRIBUTE_REQUESTS 请求；$NODE_COUNT/$NODE_COUNT completed。</p></div></div></div></div><div class="visual-block"><div class="attribute-stats"><div class="attribute-stat"><strong>$PROPERTY_NODE_COUNT</strong><span>nodes with property</span></div><div class="attribute-stat"><strong>$PROPERTY_COUNT</strong><span>property tokens</span></div><div class="attribute-stat"><strong>$STATE_NODE_COUNT</strong><span>nodes with state</span></div><div class="attribute-stat"><strong>$STATE_COUNT</strong><span>state tokens</span></div></div><pre class="schema-card">$ATTRIBUTE_EXAMPLE</pre></div></article></div>
       </section>
 
       <section id="stage-08" class="stage result">
-        <div class="container"><article class="card stage-shell"><div class="stage-top"><div class="stage-index"><strong>08</strong><span>formatter</span></div><div class="stage-copy"><h3>标准化为稀疏 Scene Graph 字典</h3><p>formatter 将节点、属性和 ConceptGraphs edge 对齐到稳定 key：<code>normalized_object_tag_originalID</code>。它只转换关系方向与大小写，不合成 room 节点，也不虚构 <code>INSIDE bedroom</code>。</p><div class="io-grid"><div class="io-box"><div class="io-label">Input <span>3 artifacts</span></div><strong>nodes + attributes + edges</strong><p>所有输入都有 SHA256 identity 和 manifest。</p></div><div class="io-box method"><div class="io-label">Method <span>deterministic</span></div><strong>ID join + sparse field merge</strong><p><code>a/b on/in</code> → <code>ON/INSIDE target</code>；空字段省略。</p></div><div class="io-box"><div class="io-label">Output <span>JSON + repr</span></div><strong>13 nodes · 1 relation</strong><p><code>scene_graph.json</code> · <code>scene_graph.txt</code> · PASS。</p></div></div></div></div></article></div>
+        <div class="container"><article class="card stage-shell"><div class="stage-top"><div class="stage-index"><strong>08</strong><span>formatter</span></div><div class="stage-copy"><h3>标准化为稀疏 Scene Graph 字典</h3><p>formatter 将节点、属性和 ConceptGraphs edge 对齐到稳定 key：<code>normalized_object_tag_originalID</code>。它只转换关系方向与大小写，不合成 room 节点，也不虚构 <code>INSIDE bedroom</code>。</p><div class="io-grid"><div class="io-box"><div class="io-label">Input <span>3 artifacts</span></div><strong>nodes + attributes + edges</strong><p>所有输入都有 SHA256 identity 和 manifest。</p></div><div class="io-box method"><div class="io-label">Method <span>deterministic</span></div><strong>ID join + sparse field merge</strong><p><code>a/b on/in</code> → <code>ON/INSIDE target</code>；空字段省略。</p></div><div class="io-box"><div class="io-label">Output <span>JSON + repr</span></div><strong>$NODE_COUNT nodes · $RELATION_COUNT relation</strong><p><code>scene_graph.json</code> · <code>scene_graph.txt</code> · PASS。</p></div></div></div></div></article></div>
       </section>
     </div>
 
@@ -788,10 +933,10 @@ def build() -> Path:
         <div class="section-head"><span class="section-no">Final artifact</span><h2>可交互 Scene Graph 浏览器</h2><p>主图只画当前最终 JSON 中的真实边。点击图中节点或下方标签，可查看 caption、3D bbox、候选标签、property、state 和 relation。</p></div>
         <div class="card result-shell">
           <div class="result-grid"><div class="graph-panel">$SEMANTIC_GRAPH</div><aside class="node-detail" aria-live="polite"><span class="detail-id" id="detail-id"></span><h3 id="detail-title"></h3><p class="detail-caption" id="detail-caption"></p><div class="detail-section"><b>PROPERTY</b><div class="dark-tags" id="detail-property"></div></div><div class="detail-section"><b>STATE</b><div class="dark-tags" id="detail-state"></div></div><div class="detail-section"><b>RELATION</b><div class="dark-tags" id="detail-relation"></div></div><div class="detail-section"><b>3D BBOX · METERS</b><div class="bbox"><div><span>center [x,y,z]</span><b id="detail-center"></b></div><div><span>extent [x,y,z]</span><b id="detail-extent"></b></div></div></div><div class="detail-section"><b>POSSIBLE TAGS</b><div class="dark-tags" id="detail-tags"></div></div></aside></div>
-          <div class="node-tools"><div class="filters" role="group" aria-label="节点筛选"><button class="filter active" data-filter="all">全部 13</button><button class="filter" data-filter="relation">有关系</button><button class="filter" data-filter="state">有状态</button><button class="filter" data-filter="structure">建筑结构</button><button class="filter" data-filter="object">物体 / 装饰</button></div><span class="mono" style="color:var(--muted);font-size:10px">solid edge = emitted relation</span></div>
+          <div class="node-tools"><div class="filters" role="group" aria-label="节点筛选"><button class="filter active" data-filter="all" aria-pressed="true">全部 $NODE_COUNT</button><button class="filter" data-filter="relation" aria-pressed="false">有关系</button><button class="filter" data-filter="state" aria-pressed="false">有状态</button><button class="filter" data-filter="structure" aria-pressed="false">建筑结构</button><button class="filter" data-filter="object" aria-pressed="false">物体 / 装饰</button></div><span class="mono" style="color:var(--muted);font-size:10px">solid edge = emitted relation</span></div>
           <div class="node-list">$NODE_BUTTONS</div>
         </div>
-        <details class="card" style="margin-top:16px"><summary>查看最终标准 JSON</summary><div class="json-toolbar" style="margin-top:15px"><span><code>outputs/$SCENE_ID/scene_graph_openai/scene_graph.json</code></span><button class="copy-button" id="copy-json">复制 JSON</button></div><pre class="json-pre" id="json-pre">$RAW_JSON</pre></details>
+        <details class="card" style="margin-top:16px"><summary>查看最终标准 JSON</summary><div class="json-toolbar" style="margin-top:15px"><span><code>outputs/$RUN_NAME/scene_graph_openai/scene_graph.json</code></span><button class="copy-button" id="copy-json" type="button">复制 JSON</button></div><pre class="json-pre" id="json-pre">$RAW_JSON</pre></details>
       </div>
     </section>
 
@@ -799,33 +944,33 @@ def build() -> Path:
       <div class="container">
         <div class="section-head"><span class="section-no">Verification & provenance</span><h2>完成状态与产物追踪</h2><p>各在线阶段均留下 manifest 或可审计产物；caption、refinement、attributes 与 formatter 明确标记 complete。最终 JSON 通过节点数、边数和字段检查，验证日志同时打印输出路径。</p></div>
         <div class="validation"><div class="terminal"><div class="terminal-head"><i></i><i></i><i></i></div><pre>$$ validation report
-nodes: 13
-relations: 1
+nodes: $NODE_COUNT
+relations: $RELATION_COUNT
 scene_graph.json: .../scene_graph_openai/scene_graph.json
 scene_graph.txt:  .../scene_graph_openai/scene_graph.txt
 validation: <span class="pass">PASS</span>
 
 $$ request accounting
-caption       52 / complete
-refinement    13 / invalid 0
-relation       2 / kept 1
-attributes    13 / complete
-formal total  80</pre></div><div class="card" style="padding:13px 18px"><table class="artifact-table"><thead><tr><th>Stage</th><th>Primary artifact</th><th>Status</th></tr></thead><tbody><tr><td>Geometry</td><td><code>geometry_manifest.json</code></td><td class="check">✓ 31</td></tr><tr><td>Detections</td><td><code>detections_manifest.json</code></td><td class="check">✓ 414</td></tr><tr><td>Mapping</td><td><code>*_post.pkl.gz</code></td><td class="check">✓ 13</td></tr><tr><td>Captions</td><td><code>cfslam_openai_captions.json</code></td><td class="check">✓ 52</td></tr><tr><td>Nodes</td><td><code>scene_graph_nodes.json</code></td><td class="check">✓ 13</td></tr><tr><td>Attributes</td><td><code>scene_graph_attributes.json</code></td><td class="check">✓ 13</td></tr><tr><td>Final</td><td><code>scene_graph.json</code></td><td class="check">✓ PASS</td></tr></tbody></table></div></div>
+caption       $CAPTION_REQUESTS / complete
+refinement    $REFINEMENT_REQUESTS / invalid 0
+relation       $CANDIDATE_COUNT / kept $RELATION_COUNT
+attributes    $ATTRIBUTE_REQUESTS / complete
+formal total  $FORMAL_REQUEST_COUNT</pre></div><div class="card" style="padding:13px 18px"><table class="artifact-table"><thead><tr><th>Stage</th><th>Primary artifact</th><th>Status</th></tr></thead><tbody><tr><td>Geometry</td><td><code>geometry_manifest.json</code></td><td class="check">✓ 31</td></tr><tr><td>Detections</td><td><code>detections_manifest.json</code></td><td class="check">✓ 414</td></tr><tr><td>Mapping</td><td><code>*_post.pkl.gz</code></td><td class="check">✓ $NODE_COUNT</td></tr><tr><td>Captions</td><td><code>cfslam_openai_captions.json</code></td><td class="check">✓ $CAPTION_COUNT</td></tr><tr><td>Nodes</td><td><code>scene_graph_nodes.json</code></td><td class="check">✓ $NODE_COUNT</td></tr><tr><td>Attributes</td><td><code>scene_graph_attributes.json</code></td><td class="check">✓ $NODE_COUNT</td></tr><tr><td>Final</td><td><code>scene_graph.json</code></td><td class="check">✓ PASS</td></tr></tbody></table></div></div>
       </div>
     </section>
 
     <section id="method-notes">
       <div class="container">
         <div class="section-head"><span class="section-no">Implementation notes</span><h2>论文思想与当前实现</h2><p>整体保持 ConceptGraphs 的对象级 3D mapping 与开放词汇场景图思想；为适配当前“只有 RGB 视频”的输入和本地模型，几何与语言模块做了可追溯替换。</p></div>
-        <div class="card compare-table-wrap"><table class="compare-table"><thead><tr><th>Component</th><th>ConceptGraphs 思路</th><th>本次当前实现</th><th>产物影响</th></tr></thead><tbody><tr><td>输入几何</td><td>消费带深度和相机姿态的 RGB-D 序列。</td><td>从 RGB 用 MapAnything 估计 metric Z-depth、K 和 c2w。</td><td>无需深度相机，但深度仍是模型估计。</td></tr><tr><td>2D perception</td><td>类别无关 mask 与视觉语言特征。</td><td>SAM3 AMG + 本地 CLIP ViT-B/16 512D。</td><td>保持开放词汇映射；模型规格与论文环境不同。</td></tr><tr><td>3D association</td><td>几何与视觉相似度驱动对象融合。</td><td>FAISS overlap + CLIP cosine，sim_sum threshold=1.2。</td><td>31 raw objects 融合为 13 个持久对象。</td></tr><tr><td>语言链路</td><td>多视角 caption、节点精炼与 on/in 判断。</td><td>OpenAI-compatible Responses，gpt-5.5；视觉与文本共用可配置模型。</td><td>52 captions、13 refined nodes、1 final relation。</td></tr><tr><td>输出 schema</td><td>对象节点及开放词汇关系。</td><td>附加通用 property/state，并转为展示目标的 sparse dict。</td><td>只输出有证据的字段；不合成房间节点。</td></tr></tbody></table></div>
-        <div class="limitations"><article class="limit"><b>单目深度</b><p>MapAnything 恢复的深度和姿态是估计值，不等价于实测 RGB-D 传感器。</p></article><article class="limit"><b>关系词表</b><p>当前最终 formatter 只保留 ConceptGraphs 的 <code>ON</code> / <code>INSIDE</code>；本场景只产生 1 条 ON。</p></article><article class="limit"><b>稀疏原则</b><p>没有直接证据时不补 room 节点，也不自动生成所有对象 INSIDE bedroom 的关系。</p></article><article class="limit"><b>语义属性</b><p>property/state 来自视觉语言推断，用于语义描述，不应视为精密物理测量。</p></article></div>
+        <div class="card compare-table-wrap"><table class="compare-table"><thead><tr><th>Component</th><th>ConceptGraphs 思路</th><th>本次当前实现</th><th>产物影响</th></tr></thead><tbody><tr><td>输入几何</td><td>消费带深度和相机姿态的 RGB-D 序列。</td><td>从 RGB 用 MapAnything 估计 metric Z-depth、K 和 c2w。</td><td>无需深度相机，但深度仍是模型估计。</td></tr><tr><td>2D perception</td><td>类别无关 mask 与视觉语言特征。</td><td>SAM3 AMG + 本地 CLIP ViT-B/16 512D。</td><td>保持开放词汇映射；模型规格与论文环境不同。</td></tr><tr><td>3D association</td><td>几何与视觉相似度驱动对象融合。</td><td>FAISS overlap + CLIP cosine，sim_sum threshold=1.2。</td><td>31 raw objects 融合为 $NODE_COUNT 个持久对象。</td></tr><tr><td>关系候选</td><td>单向 overlap、阈值图与原始权重 MST。</td><td>保持 baseline 行为；overlap 由本地 FAISS 数值兼容函数计算。</td><td>$CANDIDATE_COUNT 个候选交给受限关系 prompt。</td></tr><tr><td>语言链路</td><td>多视角 caption、节点精炼与 on/in 判断。</td><td>OpenAI-compatible Responses，$MODEL_NAME；视觉与文本共用可配置模型。</td><td>$CAPTION_COUNT captions、$NODE_COUNT refined nodes、$RELATION_COUNT final relation。</td></tr><tr><td>输出 schema</td><td>对象节点及开放词汇关系。</td><td>附加通用 property/state，并转为展示目标的 sparse dict。</td><td>只输出有证据的字段；不合成房间节点。</td></tr></tbody></table></div>
+        <div class="limitations"><article class="limit"><b>单目深度</b><p>MapAnything 恢复的深度和姿态是估计值，不等价于实测 RGB-D 传感器。</p></article><article class="limit"><b>关系词表</b><p>当前最终 formatter 只保留 ConceptGraphs 的 <code>ON</code> / <code>INSIDE</code>；本场景产生 $RELATION_COUNT 条最终关系。</p></article><article class="limit"><b>Baseline 权重</b><p>MST 直接最小化 overlap similarity 是原代码行为；本页如实展示，不把它解释为优化后的关系图。</p></article><article class="limit"><b>稀疏原则</b><p>没有直接证据时不补 room 节点，也不自动生成所有对象 INSIDE bedroom 的关系。</p></article><article class="limit"><b>语义属性</b><p>property/state 来自视觉语言推断，用于语义描述，不应视为精密物理测量。</p></article></div>
       </div>
     </section>
   </main>
 
-  <footer><div class="container footer-inner"><div><b>ConceptGraphs Pipeline Showcase</b><br>scene: $SCENE_ID · generated $GENERATED_DATE · no external assets<br>论文：<a href="https://concept-graphs.github.io/assets/pdf/2023-ConceptGraphs.pdf" target="_blank" rel="noopener">ConceptGraphs: Open-Vocabulary 3D Scene Graphs for Perception and Planning</a></div><div>环境：svpp · Python 3.11.15 · Torch 2.1.1+cu121<br>页面未嵌入 API key、请求凭证或私密配置。</div><a class="backtop" href="#top">返回顶部 ↑</a></div></footer>
+  <footer><div class="container footer-inner"><div><b>ConceptGraphs Pipeline Showcase</b><br>scene: $SCENE_ID · run: $RUN_NAME · generated $GENERATED_DATE · no external assets<br>论文：<a href="https://concept-graphs.github.io/assets/pdf/2023-ConceptGraphs.pdf" target="_blank" rel="noopener">ConceptGraphs: Open-Vocabulary 3D Scene Graphs for Perception and Planning</a></div><div>环境：svpp · Python 3.11.15 · Torch 2.1.1+cu121<br>页面未嵌入 API key、请求凭证或私密配置。</div><a class="backtop" href="#top">返回顶部 ↑</a></div></footer>
 
-  <div class="lightbox" role="dialog" aria-modal="true" aria-label="图片预览"><button type="button" aria-label="关闭">×</button><img alt="放大的结果图片"></div>
+  <div class="lightbox" role="dialog" aria-modal="true" aria-hidden="true" aria-label="图片预览"><button type="button" aria-label="关闭">×</button><img alt="放大的结果图片"></div>
   <script type="application/json" id="node-data">$NODE_JSON</script>
   <script type="application/json" id="graph-data">$GRAPH_JSON</script>
   <script type="application/json" id="relation-data">$RELATION_JSON</script>
@@ -881,8 +1026,9 @@ formal total  80</pre></div><div class="card" style="padding:13px 18px"><table c
 
       document.querySelectorAll(".filter").forEach(function (button) {
         button.addEventListener("click", function () {
-          document.querySelectorAll(".filter").forEach(function (item) { item.classList.remove("active"); });
+          document.querySelectorAll(".filter").forEach(function (item) { item.classList.remove("active"); item.setAttribute("aria-pressed", "false"); });
           button.classList.add("active");
+          button.setAttribute("aria-pressed", "true");
           var filter = button.getAttribute("data-filter");
           function isVisible(node) {
             return filter === "all" ||
@@ -897,6 +1043,8 @@ formal total  80</pre></div><div class="card" style="padding:13px 18px"><table c
             var visible = isVisible(byKey[element.getAttribute("data-node-key")]);
             element.style.opacity = visible ? "1" : ".12";
             element.style.pointerEvents = visible ? "auto" : "none";
+            element.setAttribute("aria-hidden", visible ? "false" : "true");
+            element.setAttribute("tabindex", visible ? "0" : "-1");
           });
         });
       });
@@ -915,11 +1063,25 @@ formal total  80</pre></div><div class="card" style="padding:13px 18px"><table c
 
       var lightbox = document.querySelector(".lightbox");
       var lightboxImage = lightbox.querySelector("img");
+      var lightboxClose = lightbox.querySelector("button");
+      var lightboxTrigger = null;
       document.querySelectorAll("[data-lightbox-src]").forEach(function (button) {
-        button.addEventListener("click", function () { lightboxImage.src = button.getAttribute("data-lightbox-src"); lightbox.classList.add("open"); });
+        button.addEventListener("click", function () {
+          lightboxTrigger = button;
+          lightboxImage.src = button.getAttribute("data-lightbox-src");
+          lightbox.classList.add("open");
+          lightbox.setAttribute("aria-hidden", "false");
+          lightboxClose.focus();
+        });
       });
-      function closeLightbox() { lightbox.classList.remove("open"); lightboxImage.removeAttribute("src"); }
-      lightbox.querySelector("button").addEventListener("click", closeLightbox);
+      function closeLightbox() {
+        if (!lightbox.classList.contains("open")) return;
+        lightbox.classList.remove("open");
+        lightbox.setAttribute("aria-hidden", "true");
+        lightboxImage.removeAttribute("src");
+        if (lightboxTrigger) lightboxTrigger.focus();
+      }
+      lightboxClose.addEventListener("click", closeLightbox);
       lightbox.addEventListener("click", function (event) { if (event.target === lightbox) closeLightbox(); });
       document.addEventListener("keydown", function (event) { if (event.key === "Escape") closeLightbox(); });
 
@@ -930,7 +1092,7 @@ formal total  80</pre></div><div class="card" style="padding:13px 18px"><table c
       }
       document.addEventListener("scroll", updateProgress, { passive: true });
       updateProgress();
-      selectNode("throw_pillow_9");
+      selectNode("$INITIAL_NODE_KEY");
     }());
   </script>
 </body>
@@ -947,29 +1109,93 @@ formal total  80</pre></div><div class="card" style="padding:13px 18px"><table c
         "MONTAGE": image_data_url(DERIVED / "scene_graph" / "object_montage.jpg"),
         "DEPTH_P2": f"{depth_p2:.2f}",
         "DEPTH_P98": f"{depth_p98:.2f}",
-        "STAGE_NAV": stage_nav_html(),
+        "STAGE_NAV": stage_nav_html(
+            node_count=node_count,
+            caption_count=caption_count,
+            candidate_count=candidate_count,
+            edge_count=edge_count,
+            property_count=property_count,
+            state_count=state_count,
+        ),
         "TRAJECTORY_SVG": trajectory_svg(DERIVED / "traj.txt"),
         "MASK_CHART": mask_chart_svg(counts),
-        "TOPDOWN_SVG": topdown_svg(nodes),
-        "CAPTION_VIEWS": caption_views_html(caption_views),
-        "SEMANTIC_GRAPH": semantic_graph_svg(nodes),
+        "TOPDOWN_SVG": topdown_svg(nodes, edges),
+        "CAPTION_VIEWS": caption_views_html(caption_views, example_id),
+        "SEMANTIC_GRAPH": semantic_graph_svg(nodes, edges),
         "NODE_BUTTONS": node_buttons_html(node_data),
         "NODE_JSON": node_json,
         "GRAPH_JSON": graph_json,
         "RELATION_JSON": relation_json,
         "RAW_JSON": html.escape(raw_json),
-        "SCENE_ID": SCENE_ID,
+        "SCENE_ID": html.escape(SCENE_ID),
+        "RUN_NAME": html.escape(RUN_NAME),
+        "NODE_COUNT": str(node_count),
+        "CAPTION_COUNT": str(caption_count),
+        "CANDIDATE_COUNT": str(candidate_count),
+        "RELATION_COUNT": str(edge_count),
+        "CAPTION_REQUESTS": str(caption_requests),
+        "REFINEMENT_REQUESTS": str(refinement_requests),
+        "ATTRIBUTE_REQUESTS": str(attribute_requests),
+        "FORMAL_REQUEST_COUNT": str(formal_request_count),
+        "MODEL_NAME": html.escape(model_name),
+        "EXAMPLE_ID": str(example_id),
+        "REFINEMENT_EXAMPLE": refinement_example,
+        "RELATION_CARDS": relation_cards,
+        "FINAL_EDGE_TEXT": html.escape(final_edge_text),
+        "ATTRIBUTE_EXAMPLE": attribute_example,
+        "INITIAL_NODE_KEY": html.escape(edges[0]["source_key"] if edges else node_data[0]["key"]),
         "PROPERTY_COUNT": str(property_count),
+        "PROPERTY_NODE_COUNT": str(property_node_count),
         "STATE_COUNT": str(state_count),
         "STATE_NODE_COUNT": str(state_node_count),
         "VALID_RANGE": f"{min(valid_ratios)*100:.2f}–{max(valid_ratios)*100:.2f}%",
         "GENERATED_DATE": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z"),
     }
     rendered = template.substitute(values)
+    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text(rendered, encoding="utf-8")
     return OUTPUT
 
 
+def configure_from_args(args: argparse.Namespace) -> None:
+    global SCENE_ID, RUN_NAME, DERIVED_ROOT, DERIVED, FINAL, OUTPUT
+    SCENE_ID = args.scene_id
+    RUN_NAME = args.run_name or SCENE_ID
+    DERIVED_ROOT = Path(args.derived_root).expanduser().resolve()
+    DERIVED = DERIVED_ROOT / SCENE_ID
+    FINAL = ROOT / "outputs" / RUN_NAME / "scene_graph_openai"
+    if args.output:
+        output = Path(args.output).expanduser()
+        OUTPUT = output if output.is_absolute() else ROOT / output
+    elif RUN_NAME == SCENE_ID:
+        OUTPUT = ROOT / "pipeline_showcase.html"
+    else:
+        safe_name = RUN_NAME.replace("/", "_").replace("\\", "_")
+        OUTPUT = ROOT / f"pipeline_showcase_{safe_name}.html"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Generate a self-contained ConceptGraphs pipeline showcase from existing artifacts."
+    )
+    parser.add_argument("--scene-id", default="bedroom_4_CmEIg9gMI74")
+    parser.add_argument(
+        "--run-name",
+        help="Directory name under repo outputs; defaults to --scene-id.",
+    )
+    parser.add_argument(
+        "--derived-root",
+        default="/data2/zhengjie/data/concept_graphs/outputs",
+        help="Root containing shared geometry/detection/mapping artifacts.",
+    )
+    parser.add_argument(
+        "--output",
+        help="Output HTML path. Relative paths are resolved from the repository root.",
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
+    configure_from_args(parse_args())
     output = build()
     print(output)
