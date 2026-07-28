@@ -31,10 +31,13 @@ LOG_DIR="${LOG_DIR:-$RUN_ROOT/logs}"
 SMOKE_OBJECT_ID="${SMOKE_OBJECT_ID:-5}"
 MAX_CAPTION_VIEWS="${MAX_CAPTION_VIEWS:-4}"
 DEVICE="${DEVICE:-cuda:0}"
+RELATION_MODE="${RELATION_MODE:-legacy-3d-mst}"
+MAX_RELATION_CANDIDATES="${MAX_RELATION_CANDIDATES:-100}"
 
 export CG_ROOT CG_DEPS CG_PYTHON CG_SCRIPT OUTPUT_SCRIPT ATTRIBUTE_PROMPT
 export OPENAI_BASE_URL OPENAI_MODEL OPENAI_VISION_MODEL OPENAI_TIMEOUT OPENAI_MAX_RETRIES
 export MAP_FILE RUN_ROOT SMOKE_CACHE OPENAI_CACHE LOG_DIR
+export RELATION_MODE MAX_RELATION_CANDIDATES
 export PYTHONPATH="$CG_DEPS/openai_py311:$CG_DEPS/mapping_py311:$CG_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 export LD_LIBRARY_PATH="/data2/zhengjie/miniconda3/envs/svpp/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
@@ -113,7 +116,7 @@ for required_file in "$CG_PYTHON" "$CG_SCRIPT" "$OUTPUT_SCRIPT" "$ATTRIBUTE_PROM
   fi
 done
 
-MAP_OBJECT_COUNT=$(env -u OPENAI_API_KEY "$CG_PYTHON" - "$MAP_FILE" <<'PY'
+MAP_OBJECT_COUNT=$(env -u OPENAI_API_KEY "$CG_PYTHON" - "$MAP_FILE" "$RELATION_MODE" <<'PY'
 import contextlib
 import io
 import sys
@@ -123,7 +126,10 @@ from conceptgraph.slam.slam_classes import MapObjectList
 
 scene_map = MapObjectList()
 with contextlib.redirect_stdout(io.StringIO()):
-    load_scene_map(SimpleNamespace(mapfile=sys.argv[1]), scene_map)
+    load_scene_map(
+        SimpleNamespace(mapfile=sys.argv[1], relation_mode=sys.argv[2]),
+        scene_map,
+    )
 print(len(scene_map))
 PY
 )
@@ -175,6 +181,7 @@ echo "[2/9] One-view vision smoke test"
   --mode extract-node-captions \
   --cachedir "$SMOKE_CACHE" \
   --mapfile "$MAP_FILE" \
+  --relation-mode "$RELATION_MODE" \
   --annot-inds "$SMOKE_OBJECT_ID" \
   --max-detections-per-object 1 \
   --masking-option red_outline \
@@ -200,6 +207,7 @@ echo "[3/9] Full multi-view captions"
   --mode extract-node-captions \
   --cachedir "$OPENAI_CACHE" \
   --mapfile "$MAP_FILE" \
+  --relation-mode "$RELATION_MODE" \
   --max-detections-per-object "$MAX_CAPTION_VIEWS" \
   --masking-option red_outline \
   --openai-image-detail high \
@@ -227,6 +235,7 @@ echo "[4/9] Node refinement"
   --mode refine-node-captions \
   --cachedir "$OPENAI_CACHE" \
   --mapfile "$MAP_FILE" \
+  --relation-mode "$RELATION_MODE" \
   --device "$DEVICE" \
   2>&1 | tee "$LOG_DIR/03_refine_nodes.log"
 
@@ -236,6 +245,8 @@ echo "[5/9] ConceptGraphs relation edges"
   --mode build-scenegraph \
   --cachedir "$OPENAI_CACHE" \
   --mapfile "$MAP_FILE" \
+  --relation-mode "$RELATION_MODE" \
+  --max-relation-candidates "$MAX_RELATION_CANDIDATES" \
   --device "$DEVICE" \
   2>&1 | tee "$LOG_DIR/04_build_scenegraph.log"
 
@@ -244,6 +255,7 @@ echo "[6/9] Detailed node JSON"
   --mode generate-scenegraph-json \
   --cachedir "$OPENAI_CACHE" \
   --mapfile "$MAP_FILE" \
+  --relation-mode "$RELATION_MODE" \
   --device "$DEVICE" \
   2>&1 | tee "$LOG_DIR/05_generate_nodes.log"
 

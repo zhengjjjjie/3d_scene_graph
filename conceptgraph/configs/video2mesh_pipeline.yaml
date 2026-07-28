@@ -1,0 +1,149 @@
+# ConceptGraphs -> Video2Mesh integration defaults.
+#
+# The pinned Video2Mesh/GroundingDINO repositories are consumed through
+# command-line and on-disk contracts and are never edited.  This checkout uses
+# the manually provisioned SAM2 source/environment paths below.  The bootstrap
+# block retains the pinned reference versions, but is not used for this manual
+# installation.
+
+versions:
+  video2mesh_commit: "3ed5ece2974594c26498676e1276f168e6db8962"
+  groundingdino_commit: "856dde20aee659246248e20734ef9ba5214f5e44"
+  sam2_commit: "2b90b9f5ceec907a1c18123530e92e794ad901a4"
+
+paths:
+  dependency_root: /data2/zhengjie/data/concept_graphs/video2mesh_dependencies
+  output_base: /data2/zhengjie/data/concept_graphs/video2mesh_runs
+  video2mesh_root: /data2/zhengjie/code/Video2Mesh
+  groundingdino_root: /data2/zhengjie/code/GroundingDINO
+  sam2_source: /data2/zhengjie/File/sam2
+  sam2_checkpoint: /data2/zhengjie/File/sam2/checkpoints/sam2.1_hiera_tiny.pt
+
+tools:
+  video2mesh_python: /data2/zhengjie/miniconda3/envs/groundingdino/bin/python
+  groundingdino_python: /data2/zhengjie/miniconda3/envs/groundingdino/bin/python
+  sam2_python: /data2/zhengjie/miniconda3/envs/sam2/bin/python
+  conceptgraphs_python: /data2/zhengjie/miniconda3/envs/groundingdino/bin/python
+  colmap_binary: /data2/zhengjie/miniconda3/envs/svpp/bin/colmap
+  ffprobe: ffprobe
+  git: git
+  conda: /data2/zhengjie/miniconda3/bin/conda
+
+models:
+  groundingdino_config: /data2/zhengjie/code/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py
+  groundingdino_config_sha256: 172e80017f9395668a9cb5d1b8bd9d061c0e360471c6ed673c83b69bb14399f1
+  groundingdino_checkpoint: /data2/zhengjie/code/GroundingDINO/weights/groundingdino_swint_ogc.pth
+  groundingdino_checkpoint_sha256: 3b3ca2563c77c69f651d7bd133e97139c186df06231157a64c507099c52bc799
+  sam2_model_cfg: configs/sam2.1/sam2.1_hiera_t.yaml
+  clip_model_path: /data2/zhengjie/data/huggingface/clip-vit-base-patch16
+  clip_model_sha256: ec89c7b09c749a60aae3c9cd910516f24b58214a7df060b48962d14c469cfbf0
+
+bootstrap:
+  repository: https://github.com/facebookresearch/sam2.git
+  prefix: /data2/zhengjie/data/concept_graphs/video2mesh_dependencies/sam2-env
+  source_dir: /data2/zhengjie/data/concept_graphs/video2mesh_dependencies/sam2
+  checkpoint: /data2/zhengjie/data/concept_graphs/video2mesh_dependencies/checkpoints/sam2.1_hiera_tiny.pt
+  conda_binary: /data2/zhengjie/miniconda3/bin/conda
+  python_version: "3.10"
+  torch_version: "2.5.1"
+  torchvision_version: "0.20.1"
+  pytorch_index_url: https://download.pytorch.org/whl/cu121
+  sam2_checkpoint_url: https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_tiny.pt
+  checkpoint_sha256: 7402e0d864fa82708a20fbd15bc84245c2f26dff0eb43a4b5b93452deb34be69
+
+frames:
+  every: 1
+  max_frames: 200
+  start_frame: null
+  end_frame_inclusive: null
+  start_sec: null
+  end_sec: null
+  duration_sec: null
+  source_fps: null
+
+reconstruction:
+  camera_model: PINHOLE
+  single_camera: true
+  matcher: exhaustive
+  use_gpu: false
+  focal_scale: 1.2
+  refine_focal_length: true
+  refine_principal_point: false
+  refine_extra_params: false
+  min_frames: 3
+  min_camera_poses: 2
+  min_point_count: 100
+  min_camera_coverage: 0.8
+  min_visible_point_ratio: 0.05
+
+detection:
+  # Omit queries to use the query vocabulary built into the pinned Video2Mesh
+  # revision.  Supply --queries-file for a non-bedroom/general scene.
+  queries: null
+  anchor_frame_count: 5
+  box_threshold: 0.28
+  text_threshold: 0.25
+  max_objects: 40
+  nms_iou: 0.65
+  instance_iou: 0.18
+  instance_center_distance: 0.75
+  max_instances_per_label: 8
+  merge_bed_parts: false
+  single_instance_labels: ""
+
+normalization:
+  max_anchor_frames_per_class: 2
+  max_seeds_per_class: 8
+  min_shared_nonempty_frames: 5
+  min_shorter_coverage: 0.60
+  min_median_iou: 0.85
+  min_frame_iou: 0.75
+  min_frame_iou_fraction: 0.80
+  anchor_separation_iou: 0.20
+  pillow_bed_min_containment: 0.80
+  pillow_bed_max_area_ratio: 0.35
+  pillow_dilation_px: 2
+
+tracking:
+  mask_backend: sam2
+  sam2_device: cuda
+  mask_threshold: 0.0
+  autocast: true
+  offload_video_to_cpu: true
+  offload_state_to_cpu: true
+  max_frames: 0
+
+fusion:
+  mode: probability
+  min_probability: 0.5
+  min_votes: 1
+  occlusion_filter: true
+  depth_tolerance: 0.05
+  relative_depth_tolerance: 0.03
+  exclusive_objects: true
+
+quality:
+  min_coverage_ratio: 0.7
+  max_area_cv: 1.0
+  max_center_jump_ratio: 0.35
+
+conversion:
+  clip_device: auto
+  clip_local_files_only: true
+  clip_batch_size: 16
+  embedding_dim: 512
+  crop_padding_px: 20
+  min_foreground_views: 2
+  min_background_views: 1
+  min_2d_only_views: 3
+  background_classes:
+    - wall
+    - floor
+    - ceiling
+
+profiles:
+  bedroom_validation:
+    start_frame: 2709
+    end_frame_inclusive: 3429
+    every: 24
+    max_frames: 31

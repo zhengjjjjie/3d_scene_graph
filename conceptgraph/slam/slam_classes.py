@@ -78,7 +78,7 @@ class DetectionList(list):
         for d, c in zip(self, classes):
             color = colors_dict[str(c)]
             d['pcd'].paint_uniform_color(color)
-            if color_bbox:
+            if color_bbox and d.get('bbox') is not None:
                 d['bbox'].color = color
                 
     def color_by_instance(self):
@@ -89,14 +89,16 @@ class DetectionList(list):
         if "inst_color" in self[0]:
             for d in self:
                 d['pcd'].paint_uniform_color(d['inst_color'])
-                d['bbox'].color = d['inst_color']
+                if d.get('bbox') is not None:
+                    d['bbox'].color = d['inst_color']
         else:
             cmap = matplotlib.colormaps.get_cmap("turbo")
             instance_colors = cmap(np.linspace(0, 1, len(self)))
             instance_colors = instance_colors[:, :3]
             for i in range(len(self)):
                 self[i]['pcd'].paint_uniform_color(instance_colors[i])
-                self[i]['bbox'].color = instance_colors[i]
+                if self[i].get('bbox') is not None:
+                    self[i]['bbox'].color = instance_colors[i]
             
     
 class MapObjectList(DetectionList):
@@ -123,8 +125,29 @@ class MapObjectList(DetectionList):
             s_obj_dict['clip_ft'] = to_numpy(s_obj_dict['clip_ft'])
             s_obj_dict['text_ft'] = to_numpy(s_obj_dict['text_ft'])
             
-            s_obj_dict['pcd_np'] = np.asarray(s_obj_dict['pcd'].points)
-            s_obj_dict['bbox_np'] = np.asarray(s_obj_dict['bbox'].get_box_points())
+            points = np.asarray(s_obj_dict['pcd'].points, dtype=np.float64)
+            geometry_type = s_obj_dict.get(
+                'geometry_type',
+                'colmap_3d' if len(points) else 'multiview_2d',
+            )
+            if geometry_type not in {'colmap_3d', 'multiview_2d'}:
+                raise ValueError(f"Unsupported geometry_type: {geometry_type!r}")
+            if geometry_type == 'colmap_3d':
+                if len(points) == 0 or s_obj_dict.get('bbox') is None:
+                    raise ValueError(
+                        "geometry_type=colmap_3d requires non-empty pcd and bbox"
+                    )
+                bbox_np = np.asarray(s_obj_dict['bbox'].get_box_points())
+            else:
+                if len(points) != 0 or s_obj_dict.get('bbox') is not None:
+                    raise ValueError(
+                        "geometry_type=multiview_2d requires empty pcd and bbox=None"
+                    )
+                bbox_np = np.empty((0, 3), dtype=np.float64)
+            s_obj_dict['geometry_type'] = geometry_type
+            s_obj_dict['point_count'] = int(len(points))
+            s_obj_dict['pcd_np'] = points
+            s_obj_dict['bbox_np'] = bbox_np
             s_obj_dict['pcd_color_np'] = np.asarray(s_obj_dict['pcd'].colors)
             
             del s_obj_dict['pcd']
@@ -142,12 +165,54 @@ class MapObjectList(DetectionList):
             new_obj['clip_ft'] = to_tensor(new_obj['clip_ft'])
             new_obj['text_ft'] = to_tensor(new_obj['text_ft'])
             
+            points = np.asarray(new_obj['pcd_np'], dtype=np.float64)
+            colors = np.asarray(new_obj['pcd_color_np'], dtype=np.float64)
+            bbox_points = np.asarray(new_obj['bbox_np'], dtype=np.float64)
+            if points.ndim != 2 or points.shape[1:] != (3,):
+                raise ValueError("pcd_np must have shape (N, 3)")
+            geometry_type = new_obj.get(
+                'geometry_type',
+                'colmap_3d' if len(points) else 'multiview_2d',
+            )
+            if geometry_type not in {'colmap_3d', 'multiview_2d'}:
+                raise ValueError(f"Unsupported geometry_type: {geometry_type!r}")
+            if colors.shape != points.shape:
+                raise ValueError("pcd_color_np must match pcd_np")
             new_obj['pcd'] = o3d.geometry.PointCloud()
-            new_obj['pcd'].points = o3d.utility.Vector3dVector(new_obj['pcd_np'])
-            new_obj['bbox'] = o3d.geometry.OrientedBoundingBox.create_from_points(
-                o3d.utility.Vector3dVector(new_obj['bbox_np']))
-            new_obj['bbox'].color = new_obj['pcd_color_np'][0]
-            new_obj['pcd'].colors = o3d.utility.Vector3dVector(new_obj['pcd_color_np'])
+            new_obj['pcd'].points = o3d.utility.Vector3dVector(points)
+            new_obj['pcd'].colors = o3d.utility.Vector3dVector(colors)
+            if geometry_type == 'colmap_3d':
+                if len(points) == 0 or bbox_points.shape != (8, 3):
+                    raise ValueError(
+                        "geometry_type=colmap_3d requires points and bbox_np (8, 3)"
+                    )
+                new_obj['bbox'] = o3d.geometry.OrientedBoundingBox.create_from_points(
+                    o3d.utility.Vector3dVector(bbox_points))
+                if len(colors):
+                    new_obj['bbox'].color = colors[0]
+            else:
+                if len(points) != 0 or bbox_points.shape != (0, 3):
+                    raise ValueError(
+                        "geometry_type=multiview_2d requires empty pcd_np and "
+                        "bbox_np shape (0, 3)"
+                    )
+                new_obj['bbox'] = None
+            declared_count = new_obj.get('point_count', len(points))
+            if (
+                isinstance(declared_count, bool)
+                or not isinstance(declared_count, (int, np.integer))
+                or int(declared_count) != len(points)
+            ):
+                raise ValueError("point_count does not match pcd_np")
+            point_indices = np.asarray(
+                new_obj.get('point_indices', np.empty(0, dtype=np.int64))
+            )
+            if point_indices.ndim != 1:
+                raise ValueError("point_indices must be one-dimensional")
+            if geometry_type == 'multiview_2d' and point_indices.size:
+                raise ValueError("multiview_2d point_indices must be empty")
+            new_obj['geometry_type'] = geometry_type
+            new_obj['point_count'] = int(len(points))
             
             del new_obj['pcd_np']
             del new_obj['bbox_np']

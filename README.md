@@ -27,6 +27,7 @@
 
 # Updates
 
+* A file-backed [Video2Mesh integration](docs/video2mesh_integration.md) can now replace the per-frame RGB-D mask association front end with GroundingDINO prompts, SAM2 multi-view masks, COLMAP sparse geometry, and Video2Mesh 3D point-index fusion while preserving the existing `MapObjectList`/scene-graph contract.
 * The codebase has been significantly refactored in the `ali-dev` [branch](https://github.com/concept-graphs/concept-graphs/tree/ali-dev), which provides a real-time, streamlined re-implementation that supports RGB-D video from iPhone and has a better visualization using [Rerun.io](https://rerun.io/). We also provide this [getting started video tutorial](https://youtu.be/56jEFyrqqpo?si=jo-qto5Gv8qxqEw2). Please check it out!
 * The code for real-world mapping and navigation using a Jackal robot is open-sourced [here](https://github.com/sachaMorin/concept_graphs_jackal).
 * The code for localization and mapping in AI2Thor is released in the codebase. See [here](https://github.com/concept-graphs/concept-graphs/tree/main?tab=readme-ov-file#ai2thor-related-experiments) for instructions.

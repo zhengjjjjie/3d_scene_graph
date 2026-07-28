@@ -217,6 +217,12 @@ class ProgramArgs:
     # Voxel size for downsampling
     downsample_voxel_size: float = 0.025
 
+    # Candidate generator. The legacy mode preserves the original 3D MST.
+    relation_mode: Literal["legacy-3d-mst", "multiview-2d-3d"] = "legacy-3d-mst"
+
+    # Maximum hybrid candidates; hybrid mode fails instead of truncating.
+    max_relation_candidates: int = 100
+
     # Maximum number of detections to consider, per object
     max_detections_per_object: int = 4
 
@@ -289,12 +295,16 @@ def load_scene_map(args, scene_map):
         
         # Check the type of the loaded data to decide how to proceed
         if isinstance(loaded_data, dict) and "objects" in loaded_data:
-            scene_map.load_serializable(loaded_data["objects"])
+            serialized = list(loaded_data["objects"] or [])
+            if getattr(args, "relation_mode", "legacy-3d-mst") == "multiview-2d-3d":
+                serialized.extend(list(loaded_data.get("bg_objects") or []))
+            scene_map.load_serializable(serialized)
         elif isinstance(loaded_data, list) or isinstance(loaded_data, dict):  # Replace with your expected type
             scene_map.load_serializable(loaded_data)
         else:
             raise ValueError("Unexpected data format in map file.")
         print(f"Loaded {len(scene_map)} objects")
+        return loaded_data
 
 
 
@@ -1096,10 +1106,19 @@ def refine_node_captions(args):
     for caption_entry in tqdm(captions, desc="OpenAI node refinement"):
         object_id = int(caption_entry["id"])
         bbox = scene_map[object_id]["bbox"]
+        geometry_type = scene_map[object_id].get(
+            "geometry_type",
+            "colmap_3d" if bbox is not None else "multiview_2d",
+        )
         prompt_input = {
             "id": object_id,
-            "bbox_extent": np.round(bbox.extent, 3).tolist(),
-            "bbox_center": np.round(bbox.center, 3).tolist(),
+            "bbox_extent": (
+                np.round(bbox.extent, 3).tolist() if bbox is not None else None
+            ),
+            "bbox_center": (
+                np.round(bbox.center, 3).tolist() if bbox is not None else None
+            ),
+            "geometry_type": geometry_type,
             "captions": caption_entry["captions"],
         }
         request_spec = {"settings": refinement_settings, "input": prompt_input}
@@ -1209,15 +1228,324 @@ def extract_object_tag_from_json_str(json_str):
     return object_tag
 
 
-def build_scenegraph(args):
-    import faiss
+def _build_multiview_scenegraph(
+    args,
+    scene_map,
+    segment_ids_to_retain,
+    cachedir: Path,
+):
+    """Build all evidence-qualified hybrid pairs without an MST."""
 
+    from conceptgraph.scenegraph.multiview_relations import (
+        RelationThresholds,
+        canonical_sha256,
+        load_camera_info_from_objects,
+        mask_digest,
+        pair_relation_evidence,
+        scene_diagonal,
+    )
+
+    thresholds = RelationThresholds()
+    if args.max_relation_candidates <= 0:
+        raise ValueError("max_relation_candidates must be positive")
+    camera_info, camera_path = load_camera_info_from_objects(scene_map)
+    camera_sha256 = (
+        sha256_file(camera_path) if camera_path is not None and camera_path.is_file() else None
+    )
+    diagonal = scene_diagonal(scene_map)
+    map_path = Path(args.mapfile).resolve()
+    map_sha256 = sha256_file(map_path)
+    mask_sha256 = {
+        str(original_id): mask_digest(scene_map[index])
+        for index, original_id in enumerate(segment_ids_to_retain)
+    }
+
+    pair_records = []
+    candidates = []
+    for first_index in range(len(scene_map)):
+        for second_index in range(first_index + 1, len(scene_map)):
+            first_id = segment_ids_to_retain[first_index]
+            second_id = segment_ids_to_retain[second_index]
+            evidence = pair_relation_evidence(
+                scene_map[first_index],
+                scene_map[second_index],
+                camera_info,
+                scene_diagonal_value=diagonal,
+                thresholds=thresholds,
+            )
+            record = {
+                "pair": [first_id, second_id],
+                "source_object_ids": [
+                    list(scene_map[first_index].get("source_object_ids") or []),
+                    list(scene_map[second_index].get("source_object_ids") or []),
+                ],
+                "evidence": evidence,
+            }
+            pair_records.append(record)
+            if evidence["candidate"]:
+                candidates.append(record)
+
+    relation_prompt = """
+You receive two observed indoor objects and measured multi-view/3D evidence.
+Return one JSON object with exactly "object_relation" and "reason".
+"object_relation" must be exactly one of:
+"a on b", "b on a", "a in b", "b in a", "none of these".
+
+Use the observed directional support/contact/containment and scale-independent
+3D quality together with object semantics. Distinguish ON, INSIDE, and none.
+A parent hint only recalled the pair and must never force a relation. The 3D
+bbox may be null for a multiview_2d object. No image is available.
+""".strip()
+    evidence_manifest = {
+        "schema_version": 2,
+        "mode": "multiview-2d-3d",
+        "state": "candidates_ready",
+        "thresholds": thresholds.to_dict(),
+        "thresholds_sha256": canonical_sha256(thresholds.to_dict()),
+        "prompt_sha256": hashlib.sha256(relation_prompt.encode("utf-8")).hexdigest(),
+        "model": {
+            "base_url": args.openai_base_url,
+            "model": args.openai_model,
+        },
+        "inputs": {
+            "map": str(map_path),
+            "map_sha256": map_sha256,
+            "camera_info": str(camera_path) if camera_path is not None else None,
+            "camera_sha256": camera_sha256,
+            "mask_sha256_by_object_id": mask_sha256,
+        },
+        "scene_diagonal": diagonal,
+        "pair_count": len(pair_records),
+        "candidate_count": len(candidates),
+        "max_candidates": args.max_relation_candidates,
+        "pairs": pair_records,
+    }
+    evidence_path = cachedir / "cfslam_multiview_relation_evidence.json"
+    save_json_atomic(evidence_manifest, evidence_path)
+    if len(candidates) > args.max_relation_candidates:
+        diagnostic_path = cachedir / "cfslam_relation_candidate_overflow.json"
+        save_json_atomic(
+            {
+                "candidate_count": len(candidates),
+                "maximum": args.max_relation_candidates,
+                "candidate_pairs": [record["pair"] for record in candidates],
+                "evidence_manifest": str(evidence_path),
+            },
+            diagnostic_path,
+        )
+        raise RuntimeError(
+            f"Hybrid relation candidates ({len(candidates)}) exceed the "
+            f"configured maximum ({args.max_relation_candidates}); diagnostics: "
+            f"{diagnostic_path}"
+        )
+
+    def node_payload(index: int, original_id: int) -> dict:
+        obj = scene_map[index]
+        bbox = obj.get("bbox")
+        response = obj["caption_dict"]["response"]
+        return {
+            "id": original_id,
+            "object_tag": response["object_tag"],
+            "caption": response["summary"],
+            "possible_tags": response["possible_tags"],
+            "geometry_type": obj.get(
+                "geometry_type",
+                "colmap_3d" if bbox is not None else "multiview_2d",
+            ),
+            "bbox_extent": (
+                np.round(bbox.extent, 3).tolist() if bbox is not None else None
+            ),
+            "bbox_center": (
+                np.round(bbox.center, 3).tolist() if bbox is not None else None
+            ),
+            "point_count": int(
+                obj.get("point_count", len(np.asarray(obj["pcd"].points)))
+            ),
+            "is_background": bool(obj.get("is_background", False)),
+            "source_object_ids": list(obj.get("source_object_ids") or []),
+        }
+
+    def compact_direction(value: dict) -> dict:
+        return {key: item for key, item in value.items() if key != "clusters"}
+
+    queries = []
+    pair_indices = []
+    for record in candidates:
+        first_id, second_id = record["pair"]
+        first_index = segment_ids_to_retain.index(first_id)
+        second_index = segment_ids_to_retain.index(second_id)
+        evidence = record["evidence"]
+        compact_evidence = {
+            "first_on_second_2d": compact_direction(evidence["first_on_second_2d"]),
+            "second_on_first_2d": compact_direction(evidence["second_on_first_2d"]),
+            "first_in_second_2d": compact_direction(evidence["first_in_second_2d"]),
+            "second_in_first_2d": compact_direction(evidence["second_in_first_2d"]),
+            "scale_independent_3d": evidence["scale_independent_3d"],
+            "parent_hint": evidence["parent_hint"],
+            "candidate_reasons": evidence["candidate_reasons"],
+        }
+        queries.append(
+            {
+                "object1": node_payload(first_index, first_id),
+                "object2": node_payload(second_index, second_id),
+                "observed_evidence": compact_evidence,
+            }
+        )
+        pair_indices.append((first_id, second_id))
+
+    save_json_atomic(queries, cachedir / "cfslam_object_relation_queries.json")
+    allowed_relations = {
+        "a on b",
+        "b on a",
+        "a in b",
+        "b in a",
+        "none of these",
+    }
+    cache_dir = cachedir / "cfslam_object_relation_cache"
+    cache_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(cache_dir, 0o700)
+    client = None
+    relations = []
+    cache_hits = 0
+    api_requests = 0
+    relation_manifest_path = cachedir / "cfslam_object_relations_manifest.json"
+
+    def save_relation_progress(complete: bool) -> None:
+        payload = {
+            "schema_version": 2,
+            "mode": "multiview-2d-3d",
+            "state": "complete" if complete else "running",
+            "complete": complete,
+            "candidate_pairs": [list(pair) for pair in pair_indices],
+            "completed_pairs": [
+                list(pair) for pair in pair_indices[: len(relations)]
+            ],
+            "relation_count": len(relations),
+            "evidence_manifest": str(evidence_path),
+            "evidence_manifest_sha256": sha256_file(evidence_path),
+            "cache_hits_this_run": cache_hits,
+            "api_requests_this_run": api_requests,
+        }
+        if complete:
+            payload["relations_sha256"] = canonical_sha256(relations)
+        save_json_atomic(payload, relation_manifest_path)
+
+    save_relation_progress(False)
+
+    for pair, query in zip(pair_indices, queries):
+        first_id, second_id = pair
+        pair_key = f"{first_id:06d}_{second_id:06d}"
+        request_identity = {
+            "schema_version": 2,
+            "pair": [first_id, second_id],
+            "query": query,
+            "mask_sha256": [mask_sha256[str(first_id)], mask_sha256[str(second_id)]],
+            "camera_sha256": camera_sha256,
+            "thresholds_sha256": evidence_manifest["thresholds_sha256"],
+            "prompt_sha256": evidence_manifest["prompt_sha256"],
+            "model": evidence_manifest["model"],
+        }
+        request_sha256 = canonical_sha256(request_identity)
+        cache_file = cache_dir / f"{pair_key}.json"
+        output_dict = None
+        if cache_file.is_file():
+            try:
+                cached = json.loads(cache_file.read_text(encoding="utf-8"))
+                candidate = cached.get("result")
+                if (
+                    cached.get("request_sha256") == request_sha256
+                    and cached.get("request") == request_identity
+                    and isinstance(candidate, dict)
+                    and cached.get("result_sha256") == canonical_sha256(candidate)
+                    and candidate.get("object1") == query["object1"]
+                    and candidate.get("object2") == query["object2"]
+                    and candidate.get("object_relation") in allowed_relations
+                    and isinstance(candidate.get("reason"), str)
+                    and candidate["reason"].strip()
+                ):
+                    output_dict = candidate
+            except (AttributeError, OSError, json.JSONDecodeError):
+                output_dict = None
+        if output_dict is not None:
+            cache_hits += 1
+            relations.append(output_dict)
+            save_relation_progress(False)
+            continue
+
+        if client is None:
+            client = make_openai_client_from_args(args)
+        content = request_openai_text(
+            client,
+            [
+                {
+                    "role": "user",
+                    "content": relation_prompt
+                    + "\n\n"
+                    + json.dumps(query, ensure_ascii=False),
+                }
+            ],
+            args.openai_timeout,
+            model=args.openai_model,
+        )
+        error_type = None
+        try:
+            parsed = parse_json_object_text(content)
+            if set(parsed) != {"object_relation", "reason"}:
+                raise ValueError("unexpected relation response schema")
+            relation = str(parsed["object_relation"]).strip().lower()
+            reason = str(parsed["reason"]).strip()
+            if relation not in allowed_relations or not reason:
+                raise ValueError("invalid relation or empty reason")
+            output_dict = {
+                "object1": query["object1"],
+                "object2": query["object2"],
+                "object_relation": relation,
+                "reason": reason,
+            }
+        except (AttributeError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            error_type = type(exc).__name__
+        if error_type is not None:
+            raise RuntimeError(
+                f"Invalid relation response for objects {first_id} and {second_id} "
+                f"({error_type}); response body omitted"
+            )
+        save_json_atomic(
+            {
+                "request_sha256": request_sha256,
+                "request": request_identity,
+                "result_sha256": canonical_sha256(output_dict),
+                "result": output_dict,
+            },
+            cache_file,
+        )
+        relations.append(output_dict)
+        api_requests += 1
+        save_relation_progress(False)
+
+    save_json_atomic(relations, cachedir / "cfslam_object_relations.json")
+    save_relation_progress(True)
+
+    edges = []
+    for pair, result in zip(pair_indices, relations):
+        if result["object_relation"] != "none of these":
+            edges.append((pair[0], pair[1], result["object_relation"]))
+    save_pickle_atomic(edges, cachedir / "cfslam_scenegraph_edges.pkl")
+    print(
+        f"Created hybrid scenegraph with {len(scene_map)} nodes and "
+        f"{len(edges)} edges ({cache_hits} pair-cache hits, "
+        f"{api_requests} API requests)."
+    )
+
+
+def build_scenegraph(args):
     validate_openai_runtime_args(args, require_text_model=True)
 
     from conceptgraph.slam.slam_classes import MapObjectList
 
     def compute_local_overlap_matrix(objects):
         """Compute directional point-cloud overlap without importing slam.utils."""
+        import faiss
+
         num_objects = len(objects)
         overlap_matrix = np.zeros((num_objects, num_objects), dtype=float)
         point_arrays = []
@@ -1419,6 +1747,15 @@ def build_scenegraph(args):
     map_output_dir.mkdir(parents=True, exist_ok=True)
     with gzip.open(map_output_dir / "scene_map_cfslam_pruned.pkl.gz", "wb") as f:
         pkl.dump(scene_map.to_serializable(), f)
+
+    if args.relation_mode == "multiview-2d-3d":
+        _build_multiview_scenegraph(
+            args,
+            scene_map,
+            segment_ids_to_retain,
+            cachedir,
+        )
+        return
 
     print("Computing bounding box overlaps...")
     if num_segments:
@@ -1694,10 +2031,27 @@ def generate_scenegraph_json(args):
     print(f"Loaded scene map with {len(scene_map)} objects")
 
     for i, segment in enumerate(scene_map):
+        bbox = segment.get("bbox")
+        geometry_type = segment.get(
+            "geometry_type",
+            "colmap_3d" if bbox is not None else "multiview_2d",
+        )
         _d = {
             "id": segment["caption_dict"]["id"],
-            "bbox_extent": np.round(segment['bbox'].extent, 1).tolist(),
-            "bbox_center": np.round(segment['bbox'].center, 1).tolist(),
+            "geometry_type": geometry_type,
+            "point_count": int(
+                segment.get(
+                    "point_count",
+                    len(np.asarray(segment["pcd"].points)),
+                )
+            ),
+            "source_object_ids": list(segment.get("source_object_ids") or []),
+            "bbox_extent": (
+                np.round(bbox.extent, 1).tolist() if bbox is not None else None
+            ),
+            "bbox_center": (
+                np.round(bbox.center, 1).tolist() if bbox is not None else None
+            ),
             "possible_tags": segment["caption_dict"]["response"]["possible_tags"],
             "object_tag": segment["caption_dict"]["response"]["object_tag"],
             "caption": segment["caption_dict"]["response"]["summary"],
