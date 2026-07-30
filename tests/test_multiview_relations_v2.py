@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import copy
+import json
+from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
+from PIL import Image
+import pytest
 
 from conceptgraph.integrations.video2mesh.object_normalization import (
     TrackMergeConfig,
@@ -11,6 +16,11 @@ from conceptgraph.integrations.video2mesh.object_normalization import (
     mask_iou,
     merge_track_cluster,
     normalize_detection_manifest,
+    normalize_tracks_project,
+)
+from conceptgraph.scenegraph.build_scenegraph_cfslam import (
+    _compute_local_overlap_matrix,
+    _refinement_request_is_reusable,
 )
 from conceptgraph.scenegraph.multiview_relations import (
     RelationThresholds,
@@ -119,6 +129,115 @@ def test_empty_masks_do_not_enter_iou_and_pillow_carve_is_fusion_only() -> None:
     assert all(carved[key].sum() < bed[key].sum() for key in bed)
     for key in pillow:
         np.testing.assert_array_equal(pillow[key], pillow_before[key])
+
+
+def test_track_normalization_accepts_init_directory_and_writes_native_json(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "project"
+    masks_root = root / "masks"
+    raw_track = masks_root / "2d_raw" / "lamp"
+    raw_track.mkdir(parents=True)
+    # Video2Mesh init creates this empty output directory before tracking.
+    (masks_root / "2d").mkdir()
+    mask = np.zeros((12, 16), dtype=np.uint8)
+    mask[2:10, 4:12] = 255
+    Image.fromarray(mask, mode="L").save(raw_track / "000000.png")
+    (masks_root / "object_prompts_normalized.json").write_text(
+        json.dumps(
+            {
+                "objects": [
+                    {
+                        "object_id": "lamp",
+                        "name": "lamp",
+                        "category": "lamp",
+                        "description": "test lamp",
+                        "score": 0.9,
+                    }
+                ],
+                "normalization": {"forbidden_merge_pairs": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = normalize_tracks_project(root)
+
+    manifest = json.loads(
+        (masks_root / "2d" / "tracking_manifest.json").read_text(encoding="utf-8")
+    )
+    assert result["objects"]["lamp"]["valid_frame_count"] == 1
+    assert type(manifest["objects"]["lamp"]["valid_frame_count"]) is int
+    assert (masks_root / "2d_fusion" / "tracking_manifest.json").is_file()
+    with pytest.raises(FileExistsError, match="output already exists"):
+        normalize_tracks_project(root)
+
+
+def test_legacy_overlap_skips_objects_without_3d_bbox() -> None:
+    points = np.asarray([[0.0, 0.0, 0.0], [0.01, 0.01, 0.01]])
+    cube = np.asarray(
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 1.0, 0.0],
+            [1.0, 0.0, 1.0],
+            [0.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0],
+        ]
+    )
+    bbox = SimpleNamespace(get_box_points=lambda: cube)
+    objects = [
+        {"pcd": SimpleNamespace(points=points), "bbox": bbox},
+        {"pcd": SimpleNamespace(points=points.copy()), "bbox": bbox},
+        {
+            "pcd": SimpleNamespace(points=np.empty((0, 3))),
+            "bbox": None,
+            "geometry_type": "multiview_2d",
+        },
+        {},
+    ]
+
+    overlaps = _compute_local_overlap_matrix(objects, 0.025)
+
+    assert overlaps.shape == (4, 4)
+    assert overlaps[0, 1] == pytest.approx(1.0)
+    assert overlaps[1, 0] == pytest.approx(1.0)
+    np.testing.assert_array_equal(overlaps[2:, :], 0.0)
+    np.testing.assert_array_equal(overlaps[:, 2:], 0.0)
+
+
+def test_refinement_cache_survives_unrelated_appended_caption_entries() -> None:
+    settings = {
+        "schema_version": 2,
+        "provider": "openai-compatible-responses",
+        "base_url": "https://example.test/v1",
+        "model": "test-model",
+        "prompt_sha256": "prompt",
+        "caption_file": "/tmp/captions.json",
+        "caption_file_sha256": "old-complete-file",
+        "mapfile": "/tmp/map.pkl.gz",
+        "mapfile_sha256": "map",
+    }
+    cached = {
+        "settings": settings,
+        "input": {"id": 0, "captions": ["same object caption"]},
+    }
+    current = {
+        "settings": {
+            **settings,
+            "caption_file_sha256": "new-file-with-appended-backgrounds",
+        },
+        "input": {"id": 0, "captions": ["same object caption"]},
+    }
+
+    assert _refinement_request_is_reusable(cached, current) is True
+    current["input"]["captions"] = ["changed object caption"]
+    assert _refinement_request_is_reusable(cached, current) is False
+    current["input"] = cached["input"]
+    current["settings"]["model"] = "different-model"
+    assert _refinement_request_is_reusable(cached, current) is False
 
 
 def _object(

@@ -10,8 +10,8 @@ umask 077
 unset OPENAI_LOG
 
 CG_ROOT="${CG_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)}"
-CG_DEPS="${CG_DEPS:-/data2/zhengjie/data/concept_graphs/python_packages}"
-CG_PYTHON="${CG_PYTHON:-/data2/zhengjie/miniconda3/envs/svpp/bin/python}"
+CG_DEPS="${CG_DEPS:-/data/zhengjie/data/concept_graphs/python_packages}"
+CG_PYTHON="${CG_PYTHON:-/data/zhengjie/miniconda3/envs/svpp/bin/python}"
 CG_SCRIPT="${CG_SCRIPT:-$CG_ROOT/conceptgraph/scenegraph/build_scenegraph_cfslam.py}"
 OUTPUT_SCRIPT="${OUTPUT_SCRIPT:-$CG_ROOT/conceptgraph/scenegraph/scenegraph_output.py}"
 ATTRIBUTE_PROMPT="${ATTRIBUTE_PROMPT:-$CG_ROOT/conceptgraph/scenegraph/prompts/scene_graph_attributes.txt}"
@@ -22,24 +22,28 @@ OPENAI_VISION_MODEL="${OPENAI_VISION_MODEL:-$OPENAI_MODEL}"
 OPENAI_TIMEOUT="${OPENAI_TIMEOUT:-120}"
 OPENAI_MAX_RETRIES="${OPENAI_MAX_RETRIES:-0}"
 
-RUN_NAME="${RUN_NAME:-bedroom_4_CmEIg9gMI74}"
-MAP_FILE="${MAP_FILE:-/data2/zhengjie/data/concept_graphs/outputs/bedroom_4_CmEIg9gMI74/pcd_saves/full_pcd_sam3_clip_overlap_maskconf0.95_simsum1.2_dbscan.1_sam3_clip_post.pkl.gz}"
-RUN_ROOT="${RUN_ROOT:-$CG_ROOT/outputs/$RUN_NAME}"
+SCENE_ID="${SCENE_ID:-bedroom_4_CmEIg9gMI74}"
+RUN_NAME="${RUN_NAME:-bedroom_v2m_20260729_clean1}"
+RUN_ROOT="${RUN_ROOT:-/data/zhengjie/data/concept_graphs/video2mesh_runs/$SCENE_ID/$RUN_NAME}"
+MAP_FILE="${MAP_FILE:-$RUN_ROOT/conceptgraphs/full_pcd_video2mesh_colmap_sam2.pkl.gz}"
 SMOKE_CACHE="${SMOKE_CACHE:-$RUN_ROOT/smoke}"
 OPENAI_CACHE="${OPENAI_CACHE:-$RUN_ROOT/scene_graph_openai}"
 LOG_DIR="${LOG_DIR:-$RUN_ROOT/logs}"
 SMOKE_OBJECT_ID="${SMOKE_OBJECT_ID:-5}"
 MAX_CAPTION_VIEWS="${MAX_CAPTION_VIEWS:-4}"
 DEVICE="${DEVICE:-cuda:0}"
-RELATION_MODE="${RELATION_MODE:-legacy-3d-mst}"
+RELATION_MODE="${RELATION_MODE:-multiview-2d-3d}"
 MAX_RELATION_CANDIDATES="${MAX_RELATION_CANDIDATES:-100}"
+MAP_PATH_REMAP_FROM="${MAP_PATH_REMAP_FROM:-/data2/zhengjie}"
+MAP_PATH_REMAP_TO="${MAP_PATH_REMAP_TO:-/data/zhengjie}"
 
 export CG_ROOT CG_DEPS CG_PYTHON CG_SCRIPT OUTPUT_SCRIPT ATTRIBUTE_PROMPT
 export OPENAI_BASE_URL OPENAI_MODEL OPENAI_VISION_MODEL OPENAI_TIMEOUT OPENAI_MAX_RETRIES
-export MAP_FILE RUN_ROOT SMOKE_CACHE OPENAI_CACHE LOG_DIR
+export SCENE_ID MAP_FILE RUN_ROOT SMOKE_CACHE OPENAI_CACHE LOG_DIR
 export RELATION_MODE MAX_RELATION_CANDIDATES
+export MAP_PATH_REMAP_FROM MAP_PATH_REMAP_TO
 export PYTHONPATH="$CG_DEPS/openai_py311:$CG_DEPS/mapping_py311:$CG_ROOT${PYTHONPATH:+:$PYTHONPATH}"
-export LD_LIBRARY_PATH="/data2/zhengjie/miniconda3/envs/svpp/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH="/data/zhengjie/miniconda3/envs/svpp/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 cleanup_credential() {
   unset OPENAI_API_KEY
@@ -65,6 +69,120 @@ if [[ ! -f "$CG_PYTHON" ]]; then
   echo "Missing required file: $CG_PYTHON" >&2
   exit 2
 fi
+
+if [[ ! -f "$MAP_FILE" ]]; then
+  echo "Missing required file: $MAP_FILE" >&2
+  exit 2
+fi
+
+# Older maps can contain absolute image paths from another mount point. Create
+# and reuse a derived map below RUN_ROOT with only resolvable color_path values
+# remapped. The configured source pickle is never modified.
+SOURCE_MAP_FILE="$MAP_FILE"
+MAP_FILE=$(PYTHONDONTWRITEBYTECODE=1 env -u OPENAI_API_KEY \
+  "$CG_PYTHON" - \
+  "$SOURCE_MAP_FILE" \
+  "$RUN_ROOT/runtime_inputs" \
+  "$MAP_PATH_REMAP_FROM" \
+  "$MAP_PATH_REMAP_TO" <<'PY'
+import gzip
+import hashlib
+import os
+import pickle
+import sys
+import tempfile
+from pathlib import Path
+
+source = Path(sys.argv[1]).expanduser().resolve()
+output_dir = Path(sys.argv[2]).expanduser().resolve()
+old_root = Path(sys.argv[3]).expanduser()
+new_root = Path(sys.argv[4]).expanduser()
+
+with source.open("rb") as stream:
+    source_sha256 = hashlib.file_digest(stream, "sha256").hexdigest()
+with gzip.open(source, "rb") as stream:
+    payload = pickle.load(stream)
+
+if isinstance(payload, dict) and "objects" in payload:
+    groups = [payload.get("objects") or [], payload.get("bg_objects") or []]
+elif isinstance(payload, (list, dict)):
+    groups = [payload.values() if isinstance(payload, dict) else payload]
+else:
+    raise ValueError(f"Unexpected map payload type: {type(payload).__name__}")
+
+remapped = 0
+unresolved = 0
+for group in groups:
+    for obj in group:
+        if not isinstance(obj, dict) or "color_path" not in obj:
+            continue
+        paths = []
+        for value in obj.get("color_path") or []:
+            current = Path(str(value)).expanduser()
+            replacement = current
+            if not current.is_file():
+                try:
+                    relative = current.relative_to(old_root)
+                except ValueError:
+                    relative = None
+                if relative is not None:
+                    candidate = new_root / relative
+                    if candidate.is_file():
+                        replacement = candidate
+                        remapped += 1
+                    else:
+                        unresolved += 1
+            paths.append(str(replacement))
+        obj["color_path"] = paths
+
+if remapped == 0:
+    print(source)
+    raise SystemExit(0)
+
+output_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+key = hashlib.sha256(
+    (
+        source_sha256
+        + "\0"
+        + str(old_root)
+        + "\0"
+        + str(new_root)
+    ).encode("utf-8")
+).hexdigest()[:12]
+base = source.name[:-7] if source.name.endswith(".pkl.gz") else source.stem
+destination = output_dir / f"{base}.paths-remapped-{key}.pkl.gz"
+
+if not destination.is_file():
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=output_dir,
+        prefix=f".{destination.name}.",
+        suffix=".tmp",
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    try:
+        with temporary.open("wb") as raw_stream:
+            with gzip.GzipFile(
+                filename="",
+                mode="wb",
+                fileobj=raw_stream,
+                mtime=0,
+            ) as gzip_stream:
+                pickle.dump(payload, gzip_stream, protocol=pickle.HIGHEST_PROTOCOL)
+        temporary.chmod(0o600)
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+print(
+    f"Using derived map with {remapped} remapped image paths"
+    f" ({unresolved} unresolved): {destination}",
+    file=sys.stderr,
+)
+print(destination)
+PY
+)
+export SOURCE_MAP_FILE MAP_FILE
 
 if [[ -n "${OPENAI_API_KEY_FILE:-}" ]]; then
   unset OPENAI_API_KEY

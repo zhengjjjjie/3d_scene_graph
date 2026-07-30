@@ -1013,6 +1013,33 @@ def parse_refined_object_response(content: str, object_id: int) -> dict:
     return normalized
 
 
+def _refinement_request_is_reusable(cached_request, current_request) -> bool:
+    """Allow a node response to survive unrelated appended caption entries."""
+
+    if not isinstance(cached_request, dict) or not isinstance(current_request, dict):
+        return False
+    if cached_request.get("input") != current_request.get("input"):
+        return False
+    cached_settings = cached_request.get("settings")
+    current_settings = current_request.get("settings")
+    if not isinstance(cached_settings, dict) or not isinstance(current_settings, dict):
+        return False
+    stable_keys = (
+        "schema_version",
+        "provider",
+        "base_url",
+        "model",
+        "prompt_sha256",
+        "caption_file",
+        "mapfile",
+        "mapfile_sha256",
+    )
+    return all(
+        cached_settings.get(key) == current_settings.get(key)
+        for key in stable_keys
+    )
+
+
 def refine_node_captions(args):
     """Refine multi-view captions into validated, resumable semantic nodes."""
     from conceptgraph.slam.slam_classes import MapObjectList
@@ -1129,11 +1156,17 @@ def refine_node_captions(args):
             try:
                 with open(response_file, "r", encoding="utf-8") as f:
                     cached_record = json.load(f)
-                if cached_record.get("_request") == request_spec:
+                cached_request = cached_record.get("_request")
+                if cached_request == request_spec or _refinement_request_is_reusable(
+                    cached_request,
+                    request_spec,
+                ):
                     normalized_response = parse_refined_object_response(
                         cached_record.get("response", ""), object_id
                     )
-                    record = cached_record
+                    record = {**cached_record, "_request": request_spec}
+                    if cached_request != request_spec:
+                        save_json_atomic(record, response_file)
             except (AttributeError, OSError, RuntimeError, ValueError, json.JSONDecodeError):
                 record = None
                 normalized_response = None
@@ -1537,61 +1570,72 @@ bbox may be null for a multiview_2d object. No image is available.
     )
 
 
+def _compute_local_overlap_matrix(objects, downsample_voxel_size):
+    """Compute directional 3D overlap, skipping objects without 3D geometry."""
+
+    import faiss
+
+    num_objects = len(objects)
+    overlap_matrix = np.zeros((num_objects, num_objects), dtype=float)
+    point_arrays = []
+    faiss_indices = []
+    aabb_bounds = []
+
+    for obj in objects:
+        point_cloud = obj.get("pcd")
+        points = (
+            np.asarray(point_cloud.points, dtype=np.float32)
+            if point_cloud is not None
+            else np.empty((0, 3), dtype=np.float32)
+        )
+        if points.ndim != 2 or points.shape[1:] != (3,):
+            points = np.empty((0, 3), dtype=np.float32)
+        points = np.ascontiguousarray(points)
+        point_arrays.append(points)
+
+        if len(points):
+            index = faiss.IndexFlatL2(3)
+            index.add(points)
+        else:
+            index = None
+        faiss_indices.append(index)
+
+        bbox = obj.get("bbox")
+        if bbox is None:
+            aabb_bounds.append(None)
+            continue
+        box_points = np.asarray(bbox.get_box_points(), dtype=float)
+        if box_points.ndim == 2 and box_points.shape[0] and box_points.shape[1] == 3:
+            aabb_bounds.append((box_points.min(axis=0), box_points.max(axis=0)))
+        else:
+            aabb_bounds.append(None)
+
+    distance_threshold_squared = float(downsample_voxel_size) ** 2
+    for i in range(num_objects):
+        if not len(point_arrays[i]) or aabb_bounds[i] is None:
+            continue
+        min_i, max_i = aabb_bounds[i]
+        for j in range(num_objects):
+            if i == j or faiss_indices[j] is None or aabb_bounds[j] is None:
+                continue
+            min_j, max_j = aabb_bounds[j]
+            # AABB is only a cheap prefilter. The actual score below uses
+            # the same nearest-neighbour ratio as slam.utils.
+            intersection_extent = np.minimum(max_i, max_j) - np.maximum(min_i, min_j)
+            if np.any(intersection_extent <= 0):
+                continue
+            distances, _ = faiss_indices[j].search(point_arrays[i], 1)
+            overlap_matrix[i, j] = float(
+                np.count_nonzero(distances[:, 0] < distance_threshold_squared)
+            ) / len(point_arrays[i])
+
+    return overlap_matrix
+
+
 def build_scenegraph(args):
     validate_openai_runtime_args(args, require_text_model=True)
 
     from conceptgraph.slam.slam_classes import MapObjectList
-
-    def compute_local_overlap_matrix(objects):
-        """Compute directional point-cloud overlap without importing slam.utils."""
-        import faiss
-
-        num_objects = len(objects)
-        overlap_matrix = np.zeros((num_objects, num_objects), dtype=float)
-        point_arrays = []
-        faiss_indices = []
-        aabb_bounds = []
-
-        for obj in objects:
-            points = np.asarray(obj["pcd"].points, dtype=np.float32)
-            if points.ndim != 2 or points.shape[1:] != (3,):
-                points = np.empty((0, 3), dtype=np.float32)
-            points = np.ascontiguousarray(points)
-            point_arrays.append(points)
-
-            if len(points):
-                index = faiss.IndexFlatL2(3)
-                index.add(points)
-            else:
-                index = None
-            faiss_indices.append(index)
-
-            box_points = np.asarray(obj["bbox"].get_box_points(), dtype=float)
-            if box_points.ndim == 2 and box_points.shape[0] and box_points.shape[1] == 3:
-                aabb_bounds.append((box_points.min(axis=0), box_points.max(axis=0)))
-            else:
-                aabb_bounds.append(None)
-
-        distance_threshold_squared = float(args.downsample_voxel_size) ** 2
-        for i in range(num_objects):
-            if not len(point_arrays[i]) or aabb_bounds[i] is None:
-                continue
-            min_i, max_i = aabb_bounds[i]
-            for j in range(num_objects):
-                if i == j or faiss_indices[j] is None or aabb_bounds[j] is None:
-                    continue
-                min_j, max_j = aabb_bounds[j]
-                # AABB is only a cheap prefilter. The actual score below uses
-                # the same nearest-neighbour ratio as slam.utils.
-                intersection_extent = np.minimum(max_i, max_j) - np.maximum(min_i, min_j)
-                if np.any(intersection_extent <= 0):
-                    continue
-                distances, _ = faiss_indices[j].search(point_arrays[i], 1)
-                overlap_matrix[i, j] = float(
-                    np.count_nonzero(distances[:, 0] < distance_threshold_squared)
-                ) / len(point_arrays[i])
-
-        return overlap_matrix
 
     # Load the scene map
     scene_map = MapObjectList()
@@ -1759,7 +1803,10 @@ def build_scenegraph(args):
 
     print("Computing bounding box overlaps...")
     if num_segments:
-        bbox_overlaps = compute_local_overlap_matrix(scene_map)
+        bbox_overlaps = _compute_local_overlap_matrix(
+            scene_map,
+            args.downsample_voxel_size,
+        )
     else:
         bbox_overlaps = np.zeros((0, 0), dtype=float)
 

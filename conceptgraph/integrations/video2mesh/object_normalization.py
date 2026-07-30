@@ -263,7 +263,9 @@ def merge_track_cluster(
     canonical["source_object_ids"] = source_ids
     canonical["canonical_object_id"] = str(tracks[canonical_index]["object_id"])
     canonical["object_id"] = canonical["canonical_object_id"]
-    canonical["valid_frame_count"] = sum(mask.any() for mask in merged_masks.values())
+    canonical["valid_frame_count"] = int(
+        sum(bool(mask.any()) for mask in merged_masks.values())
+    )
     canonical["area_cv"] = _area_stability(canonical)
     return canonical
 
@@ -643,6 +645,18 @@ def _bbox_from_mask(mask: np.ndarray) -> list[int] | None:
     return [int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1]
 
 
+def _output_path_is_occupied(path: Path) -> bool:
+    """Treat Video2Mesh's empty init directories as available outputs."""
+
+    if path.is_symlink():
+        return True
+    if not path.exists():
+        return False
+    if not path.is_dir():
+        return True
+    return next(path.iterdir(), None) is not None
+
+
 def normalize_tracks_project(
     project_root: str | Path,
     *,
@@ -655,8 +669,16 @@ def normalize_tracks_project(
     fusion_root = root / "masks" / "2d_fusion"
     if not raw_root.is_dir():
         raise FileNotFoundError(f"raw SAM2 mask root not found: {raw_root}")
-    if output_root.exists() or fusion_root.exists():
-        raise FileExistsError("normalized or fusion mask output already exists")
+    occupied_outputs = [
+        path
+        for path in (output_root, fusion_root)
+        if _output_path_is_occupied(path)
+    ]
+    if occupied_outputs:
+        raise FileExistsError(
+            "normalized or fusion mask output already exists: "
+            + ", ".join(str(path) for path in occupied_outputs)
+        )
 
     prompt_manifest = _read_json(root / "masks" / "object_prompts_normalized.json")
     prompts = {
