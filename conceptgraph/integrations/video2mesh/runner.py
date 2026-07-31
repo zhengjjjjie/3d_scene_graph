@@ -21,6 +21,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from fractions import Fraction
 from pathlib import Path
+from string import Template
 from typing import Any, Mapping, Sequence
 
 from conceptgraph.integrations.video2mesh.colmap_compat import (
@@ -161,6 +162,102 @@ def _as_bool(value: Any, *, name: str) -> bool:
 
 def _config_dir(config: Mapping[str, Any]) -> Path:
     return Path(str(config.get("__config_dir__", Path.cwd()))).expanduser().resolve()
+
+
+def _portable_config_variables(config_path: Path) -> dict[str, str]:
+    """Return stable path variables used by the checked-in pipeline config.
+
+    The defaults assume that external repositories are siblings of this
+    checkout, model files live below ``models/``, run artifacts live below
+    ``runs/``, and the caller is running from the ``svpp`` Conda environment.
+    Every root can be overridden without editing the tracked YAML.
+    """
+
+    repo_root = Path(__file__).resolve().parents[3]
+    # sys.prefix belongs to the interpreter actually running the pipeline.
+    # An ambient CONDA_PREFIX can point at a different shell environment when
+    # an absolute Python executable is used, so it must not drive resolution.
+    runtime_prefix = Path(sys.prefix).expanduser().resolve()
+    default_envs_root = runtime_prefix.parent
+    default_conda_root = (
+        default_envs_root.parent
+        if default_envs_root.name == "envs"
+        else runtime_prefix.parent
+    )
+
+    def configured_path(name: str, fallback: Path) -> Path:
+        value = os.environ.get(name)
+        return (
+            Path(value).expanduser().resolve()
+            if value
+            else fallback.expanduser().resolve()
+        )
+
+    workspace_root = configured_path("CG_WORKSPACE_ROOT", repo_root.parent)
+    model_root = configured_path("CG_MODEL_ROOT", repo_root / "models")
+    output_base = configured_path("CG_OUTPUT_BASE", repo_root / "runs")
+    dependency_root = configured_path(
+        "CG_DEPENDENCY_ROOT",
+        repo_root / ".cache" / "video2mesh_dependencies",
+    )
+    conda_envs_root = configured_path("CG_CONDA_ENVS_ROOT", default_envs_root)
+    conda_root = configured_path("CG_CONDA_ROOT", default_conda_root)
+
+    variables = {str(key): str(value) for key, value in os.environ.items()}
+    variables.update(
+        {
+            "CONFIG_DIR": str(config_path.parent),
+            "REPO_ROOT": str(repo_root),
+            "WORKSPACE_ROOT": str(workspace_root),
+            "MODEL_ROOT": str(model_root),
+            "OUTPUT_BASE": str(output_base),
+            "DEPENDENCY_ROOT": str(dependency_root),
+            "CONDA_ENVS_ROOT": str(conda_envs_root),
+            "CONDA_ROOT": str(conda_root),
+        }
+    )
+    return variables
+
+
+def _expand_config_strings(
+    value: Any,
+    variables: Mapping[str, str],
+    *,
+    location: str = "<root>",
+) -> Any:
+    """Recursively expand ``${NAME}`` placeholders with actionable errors."""
+
+    if isinstance(value, Mapping):
+        return {
+            key: _expand_config_strings(
+                item,
+                variables,
+                location=f"{location}.{key}",
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            _expand_config_strings(
+                item,
+                variables,
+                location=f"{location}[{index}]",
+            )
+            for index, item in enumerate(value)
+        ]
+    if isinstance(value, str) and "$" in value:
+        try:
+            return Template(value).substitute(variables)
+        except KeyError as exc:
+            missing = str(exc.args[0])
+            raise ValueError(
+                f"Undefined configuration variable {missing!r} at {location}"
+            ) from None
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid configuration variable syntax at {location}: {exc}"
+            ) from None
+    return value
 
 
 def _as_path(
@@ -439,7 +536,10 @@ def load_pipeline_config(path: os.PathLike[str] | str) -> dict[str, Any]:
         payload = yaml.safe_load(text)
     if not isinstance(payload, Mapping):
         raise ValueError(f"Pipeline config must be a mapping: {config_path}")
-    config = copy.deepcopy(dict(payload))
+    config = _expand_config_strings(
+        copy.deepcopy(dict(payload)),
+        _portable_config_variables(config_path),
+    )
     config["__config_path__"] = str(config_path)
     config["__config_dir__"] = str(config_path.parent)
     return config
@@ -585,14 +685,12 @@ def build_stage_commands(
         "paths.video2mesh_root",
         "video2mesh.root",
         "video2mesh_root",
-        default="/data2/zhengjie/code/Video2Mesh",
     )
     gdino_root = _as_path(
         resolved,
         "paths.groundingdino_root",
         "groundingdino.root",
         "groundingdino_root",
-        default="/data2/zhengjie/code/GroundingDINO",
     )
     sam2_source = _as_path(
         resolved,
@@ -1519,14 +1617,12 @@ def preflight_environment(
             "paths.video2mesh_root",
             "video2mesh.root",
             "video2mesh_root",
-            default="/data2/zhengjie/code/Video2Mesh",
         )
         gdino_root = _as_path(
             resolved_config,
             "paths.groundingdino_root",
             "groundingdino.root",
             "groundingdino_root",
-            default="/data2/zhengjie/code/GroundingDINO",
         )
         sam2_root = _as_path(
             resolved_config,
@@ -1696,6 +1792,12 @@ def preflight_environment(
         "reconstruction.colmap_binary",
         default="colmap",
     )
+    ffprobe = _as_command(
+        resolved_config,
+        "tools.ffprobe",
+        "runtime.ffprobe",
+        default="ffprobe",
+    )
     common_env = {"PYTHONPATH": _prepend_pythonpath(v2m_root)}
     gdino_env = {"PYTHONPATH": _prepend_pythonpath(v2m_root, gdino_root)}
     sam2_env = {"PYTHONPATH": _prepend_pythonpath(v2m_root, sam2_root)}
@@ -1706,6 +1808,7 @@ def preflight_environment(
         ("sam2_python", sam2_python),
         ("conceptgraphs_python", conceptgraphs_python),
         ("colmap_binary", colmap),
+        ("ffprobe", ffprobe),
     )
     for name, command in executable_specs:
         executable = _resolve_executable(command)

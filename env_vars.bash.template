@@ -1,15 +1,13 @@
-#!/bin/bash
-# Example script setting up the rnv variables needed for running ConceptGraphs
-# Please adapt it to your own paths!
+#!/usr/bin/env bash
+# Legacy ConceptGraphs variables. The Video2Mesh/SAM2 workflow uses
+# .env.example instead and does not require Grounded-SAM or LLaVA.
 
-export CG_FOLDER=/path/to/conceptgraph/
+export CG_FOLDER=/absolute/path/to/3d_scene_graph
+export GSA_PATH=/absolute/path/to/Grounded-Segment-Anything
+export REPLICA_ROOT=/absolute/path/to/Replica
+export REPLICA_CONFIG_PATH="$CG_FOLDER/conceptgraph/dataset/dataconfigs/replica/replica.yaml"
+export LLAVA_PYTHON_PATH=/absolute/path/to/llava
+export LLAVA_CKPT_PATH=/absolute/path/to/llava/checkpoint
 
-export GSA_PATH=/path/to/Grounded-Segment-Anything
-
-export REPLICA_ROOT=/path/to/Replica
-export REPLICA_CONFIG_PATH=${CG_FOLDER}/conceptgraph/dataset/dataconfigs/replica/replica.yaml
-
-export OPENAI_API_KEY=<your GPT-4 API KEY here>
-
-export LLAVA_PYTHON_PATH=/path/to/llava
-export LLAVA_CKPT_PATH=/path/to/llava/checkpoint/folder
+# Never commit a real credential. Prefer OPENAI_API_KEY_FILE with mode 600.
+# export OPENAI_API_KEY_FILE=/absolute/private/path/openai_api_key

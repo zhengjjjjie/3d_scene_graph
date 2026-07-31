@@ -8,7 +8,7 @@ CLIP embedder are imported only when conversion actually needs them.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import gzip
 import hashlib
@@ -59,7 +59,14 @@ class ImageTextEmbedder(Protocol):
 class AdapterConfig:
     """Configuration for the Video2Mesh-to-ConceptGraphs conversion."""
 
-    clip_model_path: str = "/data2/zhengjie/data/huggingface/clip-vit-base-patch16"
+    clip_model_path: str = field(
+        default_factory=lambda: str(
+            Path(__file__).resolve().parents[3]
+            / "models"
+            / "huggingface"
+            / "clip-vit-base-patch16"
+        )
+    )
     clip_model_sha256: str | None = None
     clip_device: str = "auto"
     clip_local_files_only: bool = True

@@ -15,6 +15,7 @@ import io
 import json
 import math
 import mimetypes
+import os
 import pickle
 import sys
 from datetime import datetime
@@ -29,12 +30,21 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parent
 SCENE_ID = "bedroom_4_CmEIg9gMI74"
 RUN_NAME = SCENE_ID
-DERIVED_ROOT = Path("/data2/zhengjie/data/concept_graphs/outputs")
+DERIVED_ROOT = Path(os.environ.get("CG_LEGACY_OUTPUT_ROOT", ROOT / "outputs"))
 DERIVED = DERIVED_ROOT / SCENE_ID
 FINAL = ROOT / "outputs" / RUN_NAME / "scene_graph_openai"
 OUTPUT = ROOT / "pipeline_showcase.html"
-MAPPING_PACKAGES = Path("/data2/zhengjie/data/concept_graphs/python_packages/mapping_py311")
-if MAPPING_PACKAGES.is_dir() and str(MAPPING_PACKAGES) not in sys.path:
+MAPPING_PACKAGES_VALUE = os.environ.get("CG_MAPPING_PACKAGES")
+MAPPING_PACKAGES = (
+    Path(MAPPING_PACKAGES_VALUE).expanduser()
+    if MAPPING_PACKAGES_VALUE
+    else None
+)
+if (
+    MAPPING_PACKAGES is not None
+    and MAPPING_PACKAGES.is_dir()
+    and str(MAPPING_PACKAGES) not in sys.path
+):
     # The serialized map contains an OmegaConf object. Keep the report builder
     # runnable in the existing svpp environment without a shell PYTHONPATH.
     sys.path.insert(0, str(MAPPING_PACKAGES))
@@ -1185,7 +1195,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--derived-root",
-        default="/data2/zhengjie/data/concept_graphs/outputs",
+        default=os.environ.get("CG_LEGACY_OUTPUT_ROOT", str(ROOT / "outputs")),
         help="Root containing shared geometry/detection/mapping artifacts.",
     )
     parser.add_argument(

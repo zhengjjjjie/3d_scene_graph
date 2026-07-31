@@ -1,4 +1,7 @@
-# ConceptGraphs Scene Graph 生成 Pipeline
+# ConceptGraphs Scene Graph 生成 Pipeline（历史实验记录）
+
+> 本文包含旧机器路径和早期流程，仅用于实验追溯。当前安装与运行请以
+> 仓库根目录 `README.md` 为准。
 
 本文结合当前仓库 **main@93277a0** 与论文
 [ConceptGraphs: Open-Vocabulary 3D Scene Graphs for Perception and Planning](https://concept-graphs.github.io/assets/pdf/2023-ConceptGraphs.pdf)，

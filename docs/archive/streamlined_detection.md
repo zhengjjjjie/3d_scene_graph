@@ -1,4 +1,7 @@
-# Streamlined Detection Script for ConceptGraphs
+# Streamlined Detection Script for ConceptGraphs（上游补充说明）
+
+> 本文描述原始 ConceptGraphs 检测路径，不是当前 Video2Mesh/SAM2
+> 复现流程的安装入口。
 
 The `./scripts/streamlined_detections.py` script is an updated version of the `./scripts/generate_gsa_results.py` script. It is both much simpler and runs faster.
 

@@ -132,7 +132,6 @@ celerybeat.pid
 *.sage.py
 
 # Environments
-.env
 .venv
 env/
 venv/
@@ -182,3 +181,16 @@ cfslam/temp.json
 /colmap_workspace/
 /colmap_workspace==/
 outputs/
+/runs/
+/models/
+/data/
+/.cache/
+/reports/
+
+# Local machine configuration and credentials
+.env.local
+*.local.yaml
+secrets/
+
+# Generated self-contained reports can embed frames and become very large
+/pipeline_showcase*.html

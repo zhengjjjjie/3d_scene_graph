@@ -10,21 +10,55 @@ umask 077
 unset OPENAI_LOG
 
 CG_ROOT="${CG_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)}"
-CG_DEPS="${CG_DEPS:-/data/zhengjie/data/concept_graphs/python_packages}"
-CG_PYTHON="${CG_PYTHON:-/data/zhengjie/miniconda3/envs/svpp/bin/python}"
+CG_ENV_FILE="${CG_ENV_FILE:-$CG_ROOT/.env}"
+if [[ -f "$CG_ENV_FILE" ]]; then
+  # .env is local and ignored by Git. Source only a file you trust.
+  set -a
+  # shellcheck disable=SC1090
+  source "$CG_ENV_FILE"
+  set +a
+fi
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  cat <<'EOF'
+Usage:
+  SCENE_ID=<scene> RUN_NAME=<run-id> ./run_scene_graph.sh
+  RUN_ROOT=/absolute/run/root MAP_FILE=/absolute/map.pkl.gz ./run_scene_graph.sh
+
+Optional local defaults can be stored in .env; see .env.example and README.md.
+EOF
+  exit 0
+fi
+if (($#)); then
+  echo "Unknown argument: $1 (use --help)" >&2
+  exit 2
+fi
+
+CG_DEPS="${CG_DEPS:-}"
+if [[ -z "${CG_PYTHON:-}" && -n "${CG_CONDA_ENVS_ROOT:-}" ]]; then
+  CG_PYTHON="$CG_CONDA_ENVS_ROOT/svpp/bin/python"
+fi
+CG_PYTHON="${CG_PYTHON:-$(command -v python || true)}"
 CG_SCRIPT="${CG_SCRIPT:-$CG_ROOT/conceptgraph/scenegraph/build_scenegraph_cfslam.py}"
 OUTPUT_SCRIPT="${OUTPUT_SCRIPT:-$CG_ROOT/conceptgraph/scenegraph/scenegraph_output.py}"
 ATTRIBUTE_PROMPT="${ATTRIBUTE_PROMPT:-$CG_ROOT/conceptgraph/scenegraph/prompts/scene_graph_attributes.txt}"
 
-OPENAI_BASE_URL="${OPENAI_BASE_URL:-https://www.autodl.art/api/v1}"
-OPENAI_MODEL="${OPENAI_MODEL:-gpt-5.5}"
+OPENAI_BASE_URL="${OPENAI_BASE_URL:-https://api.openai.com/v1}"
+OPENAI_MODEL="${OPENAI_MODEL:-}"
 OPENAI_VISION_MODEL="${OPENAI_VISION_MODEL:-$OPENAI_MODEL}"
 OPENAI_TIMEOUT="${OPENAI_TIMEOUT:-120}"
 OPENAI_MAX_RETRIES="${OPENAI_MAX_RETRIES:-0}"
 
-SCENE_ID="${SCENE_ID:-bedroom_4_CmEIg9gMI74}"
-RUN_NAME="${RUN_NAME:-bedroom_v2m_20260729_clean1}"
-RUN_ROOT="${RUN_ROOT:-/data/zhengjie/data/concept_graphs/video2mesh_runs/$SCENE_ID/$RUN_NAME}"
+SCENE_ID="${SCENE_ID:-}"
+RUN_NAME="${RUN_NAME:-}"
+OUTPUT_BASE="${CG_OUTPUT_BASE:-$CG_ROOT/runs}"
+if [[ -z "${RUN_ROOT:-}" ]]; then
+  if [[ -z "$SCENE_ID" || -z "$RUN_NAME" ]]; then
+    echo "Set RUN_ROOT, or set both SCENE_ID and RUN_NAME (see --help)." >&2
+    exit 2
+  fi
+  RUN_ROOT="$OUTPUT_BASE/$SCENE_ID/$RUN_NAME"
+fi
 MAP_FILE="${MAP_FILE:-$RUN_ROOT/conceptgraphs/full_pcd_video2mesh_colmap_sam2.pkl.gz}"
 SMOKE_CACHE="${SMOKE_CACHE:-$RUN_ROOT/smoke}"
 OPENAI_CACHE="${OPENAI_CACHE:-$RUN_ROOT/scene_graph_openai}"
@@ -34,16 +68,14 @@ MAX_CAPTION_VIEWS="${MAX_CAPTION_VIEWS:-4}"
 DEVICE="${DEVICE:-cuda:0}"
 RELATION_MODE="${RELATION_MODE:-multiview-2d-3d}"
 MAX_RELATION_CANDIDATES="${MAX_RELATION_CANDIDATES:-100}"
-MAP_PATH_REMAP_FROM="${MAP_PATH_REMAP_FROM:-/data2/zhengjie}"
-MAP_PATH_REMAP_TO="${MAP_PATH_REMAP_TO:-/data/zhengjie}"
+MAP_PATH_REMAP_FROM="${MAP_PATH_REMAP_FROM:-}"
+MAP_PATH_REMAP_TO="${MAP_PATH_REMAP_TO:-}"
 
 export CG_ROOT CG_DEPS CG_PYTHON CG_SCRIPT OUTPUT_SCRIPT ATTRIBUTE_PROMPT
 export OPENAI_BASE_URL OPENAI_MODEL OPENAI_VISION_MODEL OPENAI_TIMEOUT OPENAI_MAX_RETRIES
-export SCENE_ID MAP_FILE RUN_ROOT SMOKE_CACHE OPENAI_CACHE LOG_DIR
+export SCENE_ID RUN_NAME OUTPUT_BASE MAP_FILE RUN_ROOT SMOKE_CACHE OPENAI_CACHE LOG_DIR
 export RELATION_MODE MAX_RELATION_CANDIDATES
 export MAP_PATH_REMAP_FROM MAP_PATH_REMAP_TO
-export PYTHONPATH="$CG_DEPS/openai_py311:$CG_DEPS/mapping_py311:$CG_ROOT${PYTHONPATH:+:$PYTHONPATH}"
-export LD_LIBRARY_PATH="/data/zhengjie/miniconda3/envs/svpp/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 cleanup_credential() {
   unset OPENAI_API_KEY
@@ -66,7 +98,20 @@ OPENAI_ATTRIBUTE_ARGS=(
 )
 
 if [[ ! -f "$CG_PYTHON" ]]; then
-  echo "Missing required file: $CG_PYTHON" >&2
+  echo "Python executable not found; activate svpp or set CG_PYTHON." >&2
+  exit 2
+fi
+
+CG_ENV_PREFIX="$("$CG_PYTHON" -c 'import sys; print(sys.prefix)')"
+if [[ -n "$CG_DEPS" ]]; then
+  export PYTHONPATH="$CG_DEPS/openai_py311:$CG_DEPS/mapping_py311:$CG_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+else
+  export PYTHONPATH="$CG_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+fi
+export LD_LIBRARY_PATH="$CG_ENV_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+if [[ -z "$OPENAI_MODEL" ]]; then
+  echo "Set OPENAI_MODEL to a text-and-vision model supported by OPENAI_BASE_URL." >&2
   exit 2
 fi
 
@@ -79,12 +124,17 @@ fi
 # and reuse a derived map below RUN_ROOT with only resolvable color_path values
 # remapped. The configured source pickle is never modified.
 SOURCE_MAP_FILE="$MAP_FILE"
-MAP_FILE=$(PYTHONDONTWRITEBYTECODE=1 env -u OPENAI_API_KEY \
-  "$CG_PYTHON" - \
-  "$SOURCE_MAP_FILE" \
-  "$RUN_ROOT/runtime_inputs" \
-  "$MAP_PATH_REMAP_FROM" \
-  "$MAP_PATH_REMAP_TO" <<'PY'
+if [[ -n "$MAP_PATH_REMAP_FROM" || -n "$MAP_PATH_REMAP_TO" ]]; then
+  if [[ -z "$MAP_PATH_REMAP_FROM" || -z "$MAP_PATH_REMAP_TO" ]]; then
+    echo "Set both MAP_PATH_REMAP_FROM and MAP_PATH_REMAP_TO, or neither." >&2
+    exit 2
+  fi
+  MAP_FILE=$(PYTHONDONTWRITEBYTECODE=1 env -u OPENAI_API_KEY \
+    "$CG_PYTHON" - \
+    "$SOURCE_MAP_FILE" \
+    "$RUN_ROOT/runtime_inputs" \
+    "$MAP_PATH_REMAP_FROM" \
+    "$MAP_PATH_REMAP_TO" <<'PY'
 import gzip
 import hashlib
 import os
@@ -181,7 +231,8 @@ print(
 )
 print(destination)
 PY
-)
+  )
+fi
 export SOURCE_MAP_FILE MAP_FILE
 
 if [[ -n "${OPENAI_API_KEY_FILE:-}" ]]; then

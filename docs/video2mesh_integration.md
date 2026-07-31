@@ -47,23 +47,24 @@ coordinates must not be interpreted as metres.
 
 ## Setup and preflight
 
-This checkout is configured to use the manually provisioned SAM2 installation:
+The checked-in YAML resolves portable roots documented in the repository
+README. With the recommended layout, SAM2 is resolved as:
 
 ```text
-source:     /data2/zhengjie/File/sam2
-Python:     /data2/zhengjie/miniconda3/envs/sam2/bin/python
-checkpoint: /data2/zhengjie/File/sam2/checkpoints/sam2.1_hiera_tiny.pt
+source:     $WORKSPACE_ROOT/sam2
+Python:     $CONDA_ENVS_ROOT/sam2/bin/python
+checkpoint: $MODEL_ROOT/sam2/checkpoints/sam2.1_hiera_tiny.pt
 ```
 
-Do not run `bootstrap` for this manually managed layout. The command deliberately
-refuses to take ownership of a pre-existing manual environment. The bootstrap
-implementation remains available for a separately configured, fully isolated
-dependency root.
+The normal three-environment setup is manually managed. The optional
+`bootstrap` command targets a separate directory below `DEPENDENCY_ROOT` and
+does not take ownership of the named `sam2` Conda environment.
 
 Set the ConceptGraphs command interpreter:
 
 ```bash
-CG_PYTHON=/data2/zhengjie/miniconda3/envs/groundingdino/bin/python
+conda activate svpp
+CG_PYTHON="$(command -v python)"
 ```
 
 The command examples below assume this variable remains set in the same shell.
@@ -107,7 +108,7 @@ $CG_PYTHON -m conceptgraph.scripts.run_video2mesh_pipeline run \
   --config conceptgraph/configs/video2mesh_pipeline.yaml \
   --video /absolute/path/to/input.mp4 \
   --scene-id living_room \
-  --output-base /data2/zhengjie/data/concept_graphs/video2mesh_runs
+  --output-base "$CG_OUTPUT_BASE"
 ```
 
 Before allocating GPU time, inspect the exact stage commands:
@@ -117,7 +118,7 @@ $CG_PYTHON -m conceptgraph.scripts.run_video2mesh_pipeline run \
   --config conceptgraph/configs/video2mesh_pipeline.yaml \
   --video /absolute/path/to/input.mp4 \
   --scene-id living_room \
-  --output-base /data2/zhengjie/data/concept_graphs/video2mesh_runs \
+  --output-base "$CG_OUTPUT_BASE" \
   --run-id dry-run-review \
   --dry-run
 ```
@@ -131,7 +132,7 @@ $CG_PYTHON -m conceptgraph.scripts.run_video2mesh_pipeline run \
   --config conceptgraph/configs/video2mesh_pipeline.yaml \
   --video /absolute/path/to/input.mp4 \
   --scene-id laboratory \
-  --output-base /data2/zhengjie/data/concept_graphs/video2mesh_runs \
+  --output-base "$CG_OUTPUT_BASE" \
   --queries-file /absolute/path/to/laboratory_queries.txt
 ```
 
@@ -143,7 +144,7 @@ $CG_PYTHON -m conceptgraph.scripts.run_video2mesh_pipeline run \
   --config conceptgraph/configs/video2mesh_pipeline.yaml \
   --video /absolute/path/to/bedroom.mp4 \
   --scene-id bedroom_4_CmEIg9gMI74 \
-  --output-base /data2/zhengjie/data/concept_graphs/video2mesh_runs \
+  --output-base "$CG_OUTPUT_BASE" \
   --profile bedroom_validation
 ```
 

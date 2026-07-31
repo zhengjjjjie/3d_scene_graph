@@ -1,425 +1,359 @@
-# ConceptGraphs: Open-Vocabulary 3D Scene Graphs for Perception and Planning
+# 3D Scene Graph：Video2Mesh + GroundingDINO + SAM2
 
-[**Project Page**](https://concept-graphs.github.io/) |
-[**Paper**](https://concept-graphs.github.io/assets/pdf/2023-ConceptGraphs.pdf) |
-[**ArXiv**](https://arxiv.org/abs/2309.16650) |
-[**Video**](https://www.youtube.com/watch?v=mRhNkQwRYnc&feature=youtu.be&ab_channel=AliK)
+本仓库是在 [ConceptGraphs](https://github.com/concept-graphs/concept-graphs)
+基础上扩展的可复现视频场景图流水线。输入普通 RGB 视频，依次完成：
 
+```text
+视频抽帧
+  → COLMAP 稀疏重建
+  → GroundingDINO 开放词汇检测
+  → SAM2 多帧实例跟踪
+  → 2D mask 归一化与 3D 融合
+  → ConceptGraphs 对象地图
+  → 多视角 2D/3D 关系图
+  → scene_graph.json
+```
 
-[Qiao Gu](https://georgegu1997.github.io/)\*,
-[Ali Kuwajerwala](https://www.alihkw.com/)\*,
-[Sacha Morin](https://sachamorin.github.io/)\*,
-[Krishna Murthy Jatavallabhula](https://krrish94.github.io/)\*,
-[Bipasha Sen](https://bipashasen.github.io/),
-[Aditya Agarwal](https://skymanaditya1.github.io/),
-[Corban Rivera](https://www.jhuapl.edu/work/our-organization/research-and-exploratory-development/red-staff-directory/corban-rivera),
-[William Paul](https://scholar.google.com/citations?user=92bmh84AAAAJ),
-[Kirsty Ellis](https://mila.quebec/en/person/kirsty-ellis/),
-[Rama Chellappa](https://engineering.jhu.edu/faculty/rama-chellappa/),
-[Chuang Gan](https://people.csail.mit.edu/ganchuang/),
-[Celso Miguel de Melo](https://celsodemelo.net/),
-[Joshua B. Tenenbaum](http://web.mit.edu/cocosci/josh.html),
-[Antonio Torralba](https://groups.csail.mit.edu/vision/torralbalab/),
-[Florian Shkurti](http://www.cs.toronto.edu//~florian/),
-[Liam Paull](http://liampaull.ca/)
+当前实现使用 **SAM2.1 Hiera Tiny**，不是 SAM3。外部仓库、模型和输入数据均按
+只读资源使用；每次实验写入独立的 run 目录。
 
-![Splash Figure](./assets/splash-final.png)
+## 1. 已验证的软件组合
 
-# Updates
+| 组件 | 版本 |
+|---|---|
+| 操作系统 | Linux x86_64 |
+| `svpp` | Python 3.11.15、PyTorch 2.1.1、CUDA 12.1 |
+| `groundingdino` | Python 3.10.18、PyTorch 1.13.1、CUDA 11.7 |
+| `sam2` | Python 3.10.18、PyTorch 2.5.1、CUDA 12.1 |
+| COLMAP | 4.1 CPU build |
+| FFmpeg | Conda 环境内版本 |
 
-* A file-backed [Video2Mesh integration](docs/video2mesh_integration.md) can now replace the per-frame RGB-D mask association front end with GroundingDINO prompts, SAM2 multi-view masks, COLMAP sparse geometry, and Video2Mesh 3D point-index fusion while preserving the existing `MapObjectList`/scene-graph contract.
-* The codebase has been significantly refactored in the `ali-dev` [branch](https://github.com/concept-graphs/concept-graphs/tree/ali-dev), which provides a real-time, streamlined re-implementation that supports RGB-D video from iPhone and has a better visualization using [Rerun.io](https://rerun.io/). We also provide this [getting started video tutorial](https://youtu.be/56jEFyrqqpo?si=jo-qto5Gv8qxqEw2). Please check it out!
-* The code for real-world mapping and navigation using a Jackal robot is open-sourced [here](https://github.com/sachaMorin/concept_graphs_jackal).
-* The code for localization and mapping in AI2Thor is released in the codebase. See [here](https://github.com/concept-graphs/concept-graphs/tree/main?tab=readme-ov-file#ai2thor-related-experiments) for instructions.
+三套环境分开是有意设计：GroundingDINO、SAM2 和 ConceptGraphs 的已验证
+PyTorch 依赖不同。更换 CUDA/PyTorch 组合后，应重新执行第 6 节的 preflight。
 
+流水线固定并验证以下外部仓库提交：
 
-## Setup
+| 仓库 | Commit |
+|---|---|
+| Video2Mesh | `3ed5ece2974594c26498676e1276f168e6db8962` |
+| GroundingDINO | `856dde20aee659246248e20734ef9ba5214f5e44` |
+| SAM2 | `2b90b9f5ceec907a1c18123530e92e794ad901a4` |
 
-The env variables needed can be found in `env_vars.bash.template`. When following the setup guide below, you can duplicate that files and change the variables accordingly for easy setup. 
+## 2. 推荐目录结构
 
-### Install the required libraries
+默认配置假设四个仓库互为同级目录：
 
-We recommend setting up a virtual environment using virtualenv or conda. Our code has been tested with Python 3.10.12. It may also work with other later versions. We also provide the `environment.yml` file for Conda users. In generaly, directly installing conda env using `.yml` file may cause some unexpected issues, so we recommand setting up the environment by the following instructions and only using the `.yml` file as a reference. 
+```text
+workspace/
+├── 3d_scene_graph/
+├── Video2Mesh/
+├── GroundingDINO/
+└── sam2/
+```
 
-Sample instructions for `conda` users. 
+模型默认放在本仓库的 `models/`，结果默认放在 `runs/`。两者都已加入
+`.gitignore`，不会上传到远程仓库。[`.env`](.env) 会随代码提交，当前内容是
+本机可运行的路径参考；在其他机器克隆后必须按照第 5 节修改。目录不同时无需
+修改 YAML，只需修改 `.env`。
+
+## 3. 克隆固定版本
 
 ```bash
-conda create -n conceptgraph anaconda python=3.10
-conda activate conceptgraph
+mkdir -p workspace
+cd workspace
 
-# Install the required libraries
-pip install tyro open_clip_torch wandb h5py openai hydra-core distinctipy
+git clone https://github.com/zhengjjjjie/3d_scene_graph.git
+git clone https://github.com/Interstellar6/Video2Mesh.git
+git clone https://github.com/IDEA-Research/GroundingDINO.git
+git clone https://github.com/facebookresearch/sam2.git
 
-# for yolo
-pip install ultralytics
-
-# Install the Faiss library (CPU version should be fine)
-conda install -c pytorch faiss-cpu=1.7.4 mkl=2021 blas=1.0=mkl
-
-##### Install Pytorch according to your own setup #####
-# For example, if you have a GPU with CUDA 11.8 (We tested it Pytorch 2.0.1)
-conda install pytorch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 pytorch-cuda=11.8 -c pytorch -c nvidia
-
-# Install Pytorch3D (https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md)
-# conda install pytorch3d -c pytorch3d # This detects a conflict. You can use the command below, maybe with a different version
-conda install https://anaconda.org/pytorch3d/pytorch3d/0.7.4/download/linux-64/pytorch3d-0.7.4-py310_cu118_pyt201.tar.bz2
-
-# Install the gradslam package and its dependencies
-# Please clone and install them in separate folders, not within the concept-graphs folder. 
-git clone https://github.com/krrish94/chamferdist.git
-cd chamferdist
-pip install .
-cd ..
-git clone https://github.com/gradslam/gradslam.git
-cd gradslam
-git checkout conceptfusion
-pip install .
+git -C Video2Mesh checkout 3ed5ece2974594c26498676e1276f168e6db8962
+git -C GroundingDINO checkout 856dde20aee659246248e20734ef9ba5214f5e44
+git -C sam2 checkout 2b90b9f5ceec907a1c18123530e92e794ad901a4
 ```
 
-### Install [Grounded-SAM](https://github.com/IDEA-Research/Grounded-Segment-Anything) package
+Preflight 要求这三个外部仓库的已跟踪文件保持干净，以免不同机器使用了不同
+实现。安装产生的未跟踪构建文件不影响检查。
 
-Follow the instructions on the original [repo](https://github.com/IDEA-Research/Grounded-Segment-Anything#install-without-docker). ConceptGraphs has been tested with the codebase at this [commit](https://github.com/IDEA-Research/Grounded-Segment-Anything/commit/a4d76a2b55e348943cba4cd57d7553c354296223). Grounded-SAM codebase at later commits may require some adaptations. 
+## 4. 创建三套 Conda 环境
 
-First checkout the package by 
+建议使用 Miniconda/Mambaforge。环境名应保持为
+`svpp`、`groundingdino`、`sam2`；若修改环境名，需要同时设置
+`CG_CONDA_ENVS_ROOT` 并修改
+`conceptgraph/configs/video2mesh_pipeline.yaml` 中对应解释器名称。
 
 ```bash
-git clone git@github.com:IDEA-Research/Grounded-Segment-Anything.git
+cd workspace/3d_scene_graph
+
+conda env create -f environment.yml
+conda env create -f environments/groundingdino.yml
+conda env create -f environments/sam2.yml
 ```
 
-Then, install the package Following the commands listed in the original GitHub repo. You can skip the `Install osx` step and the "optional dependencies". 
-
-During this process, you will need to set the `CUDA_HOME` to be where the CUDA toolkit is installed. 
-The CUDA tookit can be set up system-wide or within a conda environment. We tested it within a conda environment, i.e. installing [cudatoolkit-dev](https://anaconda.org/conda-forge/cudatoolkit-dev) using conda. 
+安装本仓库以及两个外部 Python 包：
 
 ```bash
-# i.e. You can install cuda toolkit using conda
-conda install -c conda-forge cudatoolkit-dev
-
-# and you need to replace `export CUDA_HOME=/path/to/cuda-11.3/` by 
-export CUDA_HOME=/path/to/anaconda3/envs/conceptgraph/
+conda run -n svpp python -m pip install -e .
+conda run -n groundingdino python -m pip install --no-build-isolation -e ../GroundingDINO
+conda run -n sam2 python -m pip install --no-build-isolation -e ../sam2
 ```
 
-You also need to download `ram_swin_large_14m.pth`, `groundingdino_swint_ogc.pth`, `sam_vit_h_4b8939.pth` (and optionally `tag2text_swin_14m.pth` if you want to try Tag2Text) following the instruction [here](https://github.com/IDEA-Research/Grounded-Segment-Anything#label-grounded-sam-with-ram-or-tag2text-for-automatic-labeling). 
+Video2Mesh 通过固定仓库的 `PYTHONPATH` 调用，不需要复制或安装到本仓库。
 
-After installation, set the path to Grounded-SAM as an environment variable
+如果只运行原始 ConceptGraphs RGB-D 流程，而不是本文的视频流水线，可能还需要
+上游项目的 `gradslam`、`chamferdist`、Grounded-SAM 或 LLaVA 依赖；它们不是
+当前 Video2Mesh/SAM2 路径的必需项。
+
+## 5. 下载模型并配置本机路径
+
+在仓库根目录执行：
 
 ```bash
-export GSA_PATH=/path/to/Grounded-Segment-Anything
+MODEL_ROOT="$PWD/models"
+mkdir -p \
+  "$MODEL_ROOT/GroundingDINO/weights" \
+  "$MODEL_ROOT/sam2/checkpoints" \
+  "$MODEL_ROOT/huggingface"
+
+curl -fL \
+  https://github.com/IDEA-Research/GroundingDINO/releases/download/v0.1.0-alpha/groundingdino_swint_ogc.pth \
+  -o "$MODEL_ROOT/GroundingDINO/weights/groundingdino_swint_ogc.pth"
+
+curl -fL \
+  https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_tiny.pt \
+  -o "$MODEL_ROOT/sam2/checkpoints/sam2.1_hiera_tiny.pt"
+
+MODEL_ROOT="$MODEL_ROOT" conda run -n svpp python -c \
+  'import os; from huggingface_hub import snapshot_download; snapshot_download(repo_id="openai/clip-vit-base-patch16", local_dir=os.path.join(os.environ["MODEL_ROOT"], "huggingface", "clip-vit-base-patch16"))'
 ```
 
-### (Optional) Set up the EfficientSAM variants
-
-Follow the installation instructions on this [page](https://github.com/IDEA-Research/Grounded-Segment-Anything/tree/main/EfficientSAM). The major steps are:
-
-* Install FastSAM codebase following [here](https://github.com/CASIA-IVA-Lab/FastSAM#installation). You don't have to create a new conda env. Just installing it in the same env as the Grounded-SAM is fine.
-* Download FastSAM checkpoints [FastSAM-x.pt](https://github.com/CASIA-IVA-Lab/FastSAM#model-checkpoints) and save it to `Grounded-Segment-Anything/EfficientSAM`. 
-* Download MobileSAM checkpoints [mobile_sam.pt](https://github.com/ChaoningZhang/MobileSAM/blob/master/weights/mobile_sam.pt) and save it to `Grounded-Segment-Anything/EfficientSAM`. 
-* Download Light HQ-SAM checkpoints [sam_hq_vit_tiny.pth](https://huggingface.co/lkeab/hq-sam/resolve/main/sam_hq_vit_tiny.pth) and save it to `Grounded-Segment-Anything/EfficientSAM`. 
-
-
-### Install this repo
+校验关键模型文件：
 
 ```bash
-git clone git@github.com:concept-graphs/concept-graphs.git
-cd concept-graphs
-pip install -e .
+sha256sum \
+  models/GroundingDINO/weights/groundingdino_swint_ogc.pth \
+  models/sam2/checkpoints/sam2.1_hiera_tiny.pt \
+  models/huggingface/clip-vit-base-patch16/pytorch_model.bin
 ```
 
-### Set up LLaVA (used for scene graph generation)
+期望 SHA-256：
 
-Follow the instructions on the [LLaVA repo](https://github.com/haotian-liu/LLaVA) to set it up. You also need to prepare the LLaVA checkpoints and save them to `$LLAVA_CKPT_PATH`. We have tested with model checkpoint `LLaVA-7B-v0` and [LLaVA code](https://github.com/haotian-liu/LLaVA) at this [commit](https://github.com/haotian-liu/LLaVA/tree/8fc54a09a6be74b2abd913c468fb3d42ae826194). LLaVA codebase at later commits may require some adaptations.
+```text
+3b3ca2563c77c69f651d7bd133e97139c186df06231157a64c507099c52bc799  groundingdino_swint_ogc.pth
+7402e0d864fa82708a20fbd15bc84245c2f26dff0eb43a4b5b93452deb34be69  sam2.1_hiera_tiny.pt
+ec89c7b09c749a60aae3c9cd910516f24b58214a7df060b48962d14c469cfbf0  pytorch_model.bin
+```
+
+### 配置随仓库提交的 `.env`
+
+仓库已经包含并跟踪 [`.env`](.env)，其中保存的是当前验证机器的路径和非敏感
+模型服务参数。克隆到其他机器后，需要根据本机目录布局修改其中的绝对路径；
+无本机路径的配置模板见 [`.env.example`](.env.example)。
+
+路径变量含义如下：
+
+| 变量 | 应指向的路径 | 必要内容或用途 |
+| --- | --- | --- |
+| `CG_WORKSPACE_ROOT` | 四个代码仓库的共同父目录 | 其下应有 `3d_scene_graph/`、`Video2Mesh/`、`GroundingDINO/` 和 `sam2/` |
+| `CG_MODEL_ROOT` | 模型权重根目录 | 其下应有 `GroundingDINO/weights/groundingdino_swint_ogc.pth`、`sam2/checkpoints/sam2.1_hiera_tiny.pt` 和 `huggingface/clip-vit-base-patch16/pytorch_model.bin` |
+| `CG_OUTPUT_BASE` | 可写的实验输出根目录 | 每次运行会在其下创建 `<scene-id>/<run-id>/`；它不是输入数据目录 |
+| `CG_DEPENDENCY_ROOT` | 可写的依赖下载和 bootstrap 缓存目录 | 三个环境均已安装完成时可以为空；其中不需要放输入视频或原始数据 |
+| `CG_CONDA_ROOT` | Miniconda 或 Anaconda 安装根目录 | 其下必须存在 `bin/conda` |
+| `CG_CONDA_ENVS_ROOT` | Conda 环境的共同父目录 | 其下应有 `svpp/`、`groundingdino/` 和 `sam2/`；对应解释器为各目录下的 `bin/python` |
+| `CG_DEPS` | 旧版序列化 map 的可选兼容包目录 | 使用时应包含 `openai_py311/` 和 `mapping_py311/`；相关包已直接安装到 `svpp` 时可设为空值 |
+
+其中 `svpp` 环境还需要提供 `bin/colmap` 和 `bin/ffprobe`。输入视频路径不写入
+`.env`，而是在运行时通过 `--video /absolute/path/to/video.mp4` 传入；
+`scene-id` 和 `run-id` 也是实验名称，不是目录变量。
+
+其余非路径变量含义如下：
+
+| 变量 | 含义 |
+| --- | --- |
+| `OPENAI_BASE_URL` | OpenAI-compatible Responses API 的 HTTPS 根地址 |
+| `OPENAI_MODEL` | 节点 refinement、关系判断和属性生成使用的文本模型 |
+| `OPENAI_VISION_MODEL` | 多视角对象 caption 使用的视觉模型 |
+| `OPENAI_TIMEOUT` | 单次 API 请求的超时秒数 |
+| `OPENAI_MAX_RETRIES` | SDK 层自动重试次数 |
+
+`.env` 会上传到远程仓库，因此绝对不要加入 `OPENAI_API_KEY`、访问令牌、密码
+或其他凭据。`run_scene_graph.sh` 默认隐藏读取 API key；也可以在仓库外创建
+权限为 `600` 的 key 文件，并在运行前设置 `OPENAI_API_KEY_FILE`。
+
+手动运行 Python 入口前加载 `.env`：
 
 ```bash
-# Set the env variables as follows (change the paths accordingly)
-export LLAVA_PYTHON_PATH=/path/to/llava
-export LLAVA_CKPT_PATH=/path/to/LLaVA-7B-v0
+set -a
+source .env
+set +a
+conda activate svpp
 ```
 
-## Prepare dataset (Replica as an example)
+## 6. 运行环境预检
 
-ConceptGraphs takes posed RGB-D images as input. Here we show how to prepare the dataset using [Replica](https://github.com/facebookresearch/Replica-Dataset) as an example. Instead of the original Replica dataset, download the scanned RGB-D trajectories of the Replica dataset provided by [Nice-SLAM](https://github.com/cvg/nice-slam). It contains rendered trajectories using the mesh models provided by the original Replica datasets. 
-
-Download the Replica RGB-D scan dataset using the downloading [script](https://github.com/cvg/nice-slam/blob/master/scripts/download_replica.sh) in [Nice-SLAM](https://github.com/cvg/nice-slam#replica-1) and set `$REPLICA_ROOT` to its saved path.
+长时间运行之前先检查仓库版本、模型 hash、三个解释器、CUDA、COLMAP、FFmpeg
+和输入视频：
 
 ```bash
-export REPLICA_ROOT=/path/to/Replica
+VIDEO=/absolute/path/to/video.mp4
 
-export CG_FOLDER=/path/to/concept-graphs/
-export REPLICA_CONFIG_PATH=${CG_FOLDER}/conceptgraph/dataset/dataconfigs/replica/replica.yaml
+python -m conceptgraph.scripts.run_video2mesh_pipeline preflight \
+  --config conceptgraph/configs/video2mesh_pipeline.yaml \
+  --video "$VIDEO"
 ```
 
-ConceptGraphs can also be easily run on other dataset. See `dataset/datasets_common.py` for how to write your own dataloader. 
-
-## Run ConceptGraph
-
-The following commands should be run in the `conceptgraph` folder.
+成功时 JSON 输出中的 `ok` 为 `true`。也可以只生成完整阶段命令而不执行：
 
 ```bash
-cd conceptgraph
+OUTPUT_BASE="${CG_OUTPUT_BASE:-$PWD/runs}"
+
+python -m conceptgraph.scripts.run_video2mesh_pipeline run \
+  --config conceptgraph/configs/video2mesh_pipeline.yaml \
+  --video "$VIDEO" \
+  --scene-id my_scene \
+  --output-base "$OUTPUT_BASE" \
+  --run-id dry_run_check \
+  --dry-run
 ```
 
-### (Optional) Run regular 3D reconstruction for sanity check
+## 7. 从视频构建 ConceptGraphs Map
 
-The following command runs a 3D RGB reconstruction ([GradSLAM](https://github.com/gradslam/gradslam)) of a replica scene and also visualize it. This is useful for sanity check. 
-
-* `--visualize` requires it to be run with GUI.
+每次全新实验使用一个从未用过的 `run-id`：
 
 ```bash
-SCENE_NAME=room0
-python scripts/run_slam_rgb.py \
-    --dataset_root $REPLICA_ROOT \
-    --dataset_config $REPLICA_CONFIG_PATH \
-    --scene_id $SCENE_NAME \
-    --image_height 480 \
-    --image_width 640 \
-    --stride 5 \
-    --visualize
+export VIDEO=video_data_path
+export SCENE_ID=my_scene
+export RUN_ID=run_001
+export OUTPUT_BASE="${CG_OUTPUT_BASE:-$PWD/runs}"
+
+python -m conceptgraph.scripts.run_video2mesh_pipeline run \
+  --config conceptgraph/configs/video2mesh_pipeline.yaml \
+  --video "$VIDEO" \
+  --scene-id "$SCENE_ID" \
+  --output-base "$OUTPUT_BASE" \
+  --run-id "$RUN_ID"
 ```
 
-### Extract 2D (Detection) Segmentation and per-resgion features
+通用视频默认最多均匀选择 200 帧。可使用以下参数覆盖：
 
-First, (Detection) Segmentation results and per-region CLIP features are extracted. In the following, we provide two options. 
-* The first one (ConceptGraphs) uses SAM in the "segment all" mode and extract class-agnostic masks. 
-* The second one (ConceptGraphs-Detect) uses a tagging model and a detection model to extract class-aware bounding boxes first, and then use them as prompts for SAM to segment each object. 
+```text
+--start-frame N --end-frame N --stride N --max-frames N
+--queries-file /absolute/path/to/object_queries.txt
+```
+
+仓库中的 `bedroom_validation` profile 只对应原实验视频的源帧
+`2709, 2733, ..., 3429`：
 
 ```bash
-SCENE_NAME=room0
-
-# The CoceptGraphs (without open-vocab detector)
-python scripts/generate_gsa_results.py \
-    --dataset_root $REPLICA_ROOT \
-    --dataset_config $REPLICA_CONFIG_PATH \
-    --scene_id $SCENE_NAME \
-    --class_set none \
-    --stride 5
-
-# The ConceptGraphs-Detect 
-CLASS_SET=ram
-python scripts/generate_gsa_results.py \
-    --dataset_root $REPLICA_ROOT \
-    --dataset_config $REPLICA_CONFIG_PATH \
-    --scene_id $SCENE_NAME \
-    --class_set $CLASS_SET \
-    --box_threshold 0.2 \
-    --text_threshold 0.2 \
-    --stride 5 \
-    --add_bg_classes \
-    --accumu_classes \
-    --exp_suffix withbg_allclasses
+python -m conceptgraph.scripts.run_video2mesh_pipeline run \
+  --config conceptgraph/configs/video2mesh_pipeline.yaml \
+  --video "$VIDEO" \
+  --scene-id bedroom_4_CmEIg9gMI74 \
+  --output-base "$OUTPUT_BASE" \
+  --run-id bedroom_validation_001 \
+  --profile bedroom_validation
 ```
 
-The above commands will save the detection and segmentation results in `$REPLICA_ROOT/$SCENE_NAME/`. 
-The visualization of the detection and segmentation can be viewed in `$REPLICA_ROOT/$SCENE_NAME/gsa_vis_none` and `$REPLICA_ROOT/$SCENE_NAME/gsa_vis_ram_withbg_allclasses` respectively. 
+中断后只能对同一个显式 `run-id` 使用 `--resume`。Runner 会核对输入、
+配置、commit 和阶段产物 hash；不匹配时拒绝混用旧结果。
 
-You can ignore the `There's a wrong phrase happen, this is because of our post-process merged wrong tokens, which will be modified in the future. We will assign it with a random label at this time.` message for now. 
+Map 输出位置：
 
-### Run the 3D object mapping system
+```text
+<output-base>/<scene-id>/<run-id>/
+├── v2m_project/
+│   └── logs/conceptgraphs_video2mesh/
+└── conceptgraphs/
+    ├── full_pcd_video2mesh_colmap_sam2.pkl.gz
+    └── full_pcd_video2mesh_colmap_sam2.conversion.json
+```
 
-The following command builds an object-based 3D map of the scene, using the image segmentation results from above.  
+## 8. 从 Map 构建 scene graph
 
-* Use `save_objects_all_frames=True` to save the mapping results at every frame, which can be used for animated visualization by `scripts/animate_mapping_interactive.py` and `scripts/animate_mapping_save.py`. 
-* Use `merge_interval=20  merge_visual_sim_thresh=0.8  merge_text_sim_thresh=0.8` to also perform overlap-based merging during the mapping process. 
+`run_scene_graph.sh` 会自动读取仓库根目录的 `.env`。确保当前 shell 使用
+`svpp`：
 
 ```bash
-# Using the CoceptGraphs (without open-vocab detector)
-THRESHOLD=1.2
-python slam/cfslam_pipeline_batch.py \
-    dataset_root=$REPLICA_ROOT \
-    dataset_config=$REPLICA_CONFIG_PATH \
-    stride=5 \
-    scene_id=$SCENE_NAME \
-    spatial_sim_type=overlap \
-    mask_conf_threshold=0.95 \
-    match_method=sim_sum \
-    sim_threshold=${THRESHOLD} \
-    dbscan_eps=0.1 \
-    gsa_variant=none \
-    class_agnostic=True \
-    skip_bg=True \
-    max_bbox_area_ratio=0.5 \
-    save_suffix=overlap_maskconf0.95_simsum${THRESHOLD}_dbscan.1_merge20_masksub \
-    merge_interval=20 \
-    merge_visual_sim_thresh=0.8 \
-    merge_text_sim_thresh=0.8
+conda activate svpp
 
-# On the ConceptGraphs-Detect 
-SCENE_NAME=room0
-THRESHOLD=1.2
-python slam/cfslam_pipeline_batch.py \
-    dataset_root=$REPLICA_ROOT \
-    dataset_config=$REPLICA_CONFIG_PATH \
-    stride=5 \
-    scene_id=$SCENE_NAME \
-    spatial_sim_type=overlap \
-    mask_conf_threshold=0.25 \
-    match_method=sim_sum \
-    sim_threshold=${THRESHOLD} \
-    dbscan_eps=0.1 \
-    gsa_variant=ram_withbg_allclasses \
-    skip_bg=False \
-    max_bbox_area_ratio=0.5 \
-    save_suffix=overlap_maskconf0.25_simsum${THRESHOLD}_dbscan.1
+SCENE_ID=my_scene \
+RUN_NAME=run_001 \
+./run_scene_graph.sh
 ```
 
-The above commands will save the mapping results in `$REPLICA_ROOT/$SCENE_NAME/pcd_saves`. It will create two `pkl.gz` files, where the one with `_post` suffix indicates results after some post processing, which we recommend using.`
-
-If you run the above command with `save_objects_all_frames=True`, it will create a folder in `$REPLICA_ROOT/$SCENE_NAME/objects_all_frames`. Then you can run the following command to visualize the mapping process or save it to a video. Also see the relevant files for available key callbacks for viusalization options. 
-
-```
-python scripts/animate_mapping_interactive.py --input_folder $REPLICA_ROOT/$SCENE_NAME/objects_all_frames/<folder_name>
-python scripts/animate_mapping_save.py --input_folder $REPLICA_ROOT/$SCENE_NAME/objects_all_frames/<folder_name>
-```
-
-### Visualize the object-based mapping results
+也可以显式指定任意可信 Map 和结果目录：
 
 ```bash
-python scripts/visualize_cfslam_results.py --result_path /path/to/output.pkl.gz
+RUN_ROOT=/absolute/path/to/run_root \
+MAP_FILE=/absolute/path/to/full_pcd_video2mesh_colmap_sam2.pkl.gz \
+./run_scene_graph.sh
 ```
 
-Then in the open3d visualizer window, you can use the following key callbacks to change the visualization. 
-* Press `b` to toggle the background point clouds (wall, floor, ceiling, etc.). Only works on the ConceptGraphs-Detect.
-* Press `c` to color the point clouds by the object class from the tagging model. Only works on the ConceptGraphs-Detect.
-* Press `r` to color the point clouds by RGB. 
-* Press `f` and type text in the terminal, and the point cloud will be colored by the CLIP similarity with the input text. 
-* Press `i` to color the point clouds by object instance ID. 
+最终结果：
 
-### Evaluate semantic segmentation from the object-based mapping results on Replica datasets
+```text
+<run-root>/scene_graph_openai/scene_graph.json
+<run-root>/scene_graph_openai/scene_graph.txt
+<run-root>/scene_graph_openai/scene_graph_nodes.json
+<run-root>/scene_graph_openai/cfslam_multiview_relation_evidence.json
+<run-root>/logs/
+```
 
-First, download the GT point cloud with per-point semantic segmentation labels from this [Google Drive link](https://drive.google.com/file/d/1NhQIM5PCH5L5vkZDSRq6YF1bRaSX2aem/view?usp=sharing). Please refer to [this issue](https://github.com/concept-graphs/concept-graphs/issues/18#issuecomment-1876673985) for a brief description of how they are generated. Unzip the file and record its location in `REPLICA_SEMANTIC_ROOT`. 
+若旧 Map 内部的 `color_path` 来自另一挂载点，可临时设置
+`MAP_PATH_REMAP_FROM` 和 `MAP_PATH_REMAP_TO`。脚本只在
+`<run-root>/runtime_inputs/` 创建派生 Map，不修改源 pickle。新实验不需要路径
+重映射。
 
-Then run the following command to evaluate the semantic segmentation results. The results will be saved in the `results` folder, where the mean recall `mrecall` is the mAcc and `fmiou` is the F-mIoU reported in the paper. 
+## 9. 数据安全和复现约束
+
+- 输入视频、外部仓库和模型权重不会被流水线改写。
+- 新 run 默认拒绝已存在的非空目录；重新实验应更换 `run-id`。
+- `--resume` 不是覆盖开关，只会复用 hash 完全匹配的阶段。
+- 模型、数据、run 输出、secret 和自包含 HTML 报告均被 Git 忽略。
+- `.env` 会被 Git 跟踪，只允许保存路径和非敏感运行参数，禁止保存 API key。
+- Pickle 只能加载自己生成或来源可信的文件。
+- COLMAP 稀疏重建尺度是任意尺度，坐标不能直接解释为米。
+- 没有有效 3D 点但具有足够多视图的对象会保留为
+  `geometry_type=multiview_2d`，其运行时 `bbox=None`。
+
+## 10. 测试
 
 ```bash
-# CoceptGraphs (without open-vocab detector)
-python scripts/eval_replica_semseg.py \
-    --replica_root $REPLICA_ROOT \
-    --replica_semantic_root $REPLICA_SEMANTIC_ROOT \
-    --n_exclude 6 \
-    --pred_exp_name none_overlap_maskconf0.95_simsum1.2_dbscan.1_merge20_masksub
-
-# On the ConceptGraphs-Detect (Grounding-DINO as the object detector)
-python scripts/eval_replica_semseg.py \
-    --replica_root $REPLICA_ROOT \
-    --replica_semantic_root $REPLICA_SEMANTIC_ROOT \
-    --n_exclude 6 \
-    --pred_exp_name ram_withbg_allclasses_overlap_maskconf0.25_simsum1.2_dbscan.1_masksub
+conda activate svpp
+bash -n run_scene_graph.sh
+python -m pytest -q \
+  tests/test_video2mesh_integration.py \
+  tests/test_multiview_relations_v2.py
 ```
 
+测试不调用模型 API，也不会修改原始视频或外部仓库。
 
+## 11. 常见问题
 
-### Extract object captions and build scene graphs
+- `conceptgraphs_python_matches_caller`：当前命令不是从 `svpp` 执行。运行
+  `conda activate svpp`，或检查 `CG_CONDA_ENVS_ROOT`。
 
-Ensure that the `openai` package is installed and that your APIKEY is set. We recommend using GPT-4, since GPT-3.5 often produces inconsistent results on this task.
-```bash
-export OPENAI_API_KEY=<your GPT-4 API KEY here>
-```
+- 模型或仓库 hash/commit 不匹配：使用第 3、5 节固定的版本。不要通过关闭
+  preflight 混用模型结果。
 
-Also note that if you are using the same [commit](https://github.com/haotian-liu/LLaVA/tree/8fc54a09a6be74b2abd913c468fb3d42ae826194) as we did, you may need to make the following change at [this line](https://github.com/haotian-liu/LLaVA/blob/8fc54a09a6be74b2abd913c468fb3d42ae826194/llava/mm_utils.py#L68) in the original LLaVa repo to run the following commands. 
+- `normalize_mask_tracks` 报输出已存在：空的 Video2Mesh 初始化目录可以复用；
+  非空目录会被保护。全新实验换 `run-id`，中断恢复使用 `--resume`。
 
-```python
-            # if output_ids[0, -keyword_id.shape[0]:] == keyword_id:
-            #     return True
-            if torch.equal(output_ids[0, -keyword_id.shape[0]:], keyword_id):
-                return True
-```
+- API 的 model listing 返回 404：某些 OpenAI-compatible 服务不实现模型枚举；
+  该项本身可忽略，但 smoke test 必须真正返回视觉 caption。确认
+  `OPENAI_BASE_URL` 和模型 ID 与服务一致。
 
-Then run the following commands sequentially to extract per-object captions and build the 3D scene graph. 
+- 关系阶段遇到 `bbox=None`：当前实现会跳过没有 3D geometry 的对象进行 3D
+  overlap，同时保留其多视角 2D 关系证据。请确认使用的是本仓库测试通过的
+  版本。
 
-```bash
-SCENE_NAME=room0
-PKL_FILENAME=output.pkl.gz  # Change this to the actual output file name of the pkl.gz file
+## 项目来源
 
-python scenegraph/build_scenegraph_cfslam.py \
-    --mode extract-node-captions \
-    --cachedir ${REPLICA_ROOT}/${SCENE_NAME}/sg_cache \
-    --mapfile ${REPLICA_ROOT}/${SCENE_NAME}/pcd_saves/${PKL_FILENAME}
+原始项目与论文：
 
-python scenegraph/build_scenegraph_cfslam.py \
-    --mode refine-node-captions \
-    --cachedir ${REPLICA_ROOT}/${SCENE_NAME}/sg_cache \
-    --mapfile ${REPLICA_ROOT}/${SCENE_NAME}/pcd_saves/${PKL_FILENAME}
+- [ConceptGraphs project page](https://concept-graphs.github.io/)
+- [ConceptGraphs paper](https://arxiv.org/abs/2309.16650)
+- [上游仓库](https://github.com/concept-graphs/concept-graphs)
 
-python scenegraph/build_scenegraph_cfslam.py \
-    --mode build-scenegraph \
-    --cachedir ${REPLICA_ROOT}/${SCENE_NAME}/sg_cache \
-    --mapfile ${REPLICA_ROOT}/${SCENE_NAME}/pcd_saves/${PKL_FILENAME}
-```
-
-Then the object map with scene graph can be visualized using the following command. 
-* Press `g` to show the scene graph. 
-* Press "+" and "-" to increase and decrease the size of point cloud for better visualization.
-
-```bash
-python scripts/visualize_cfslam_results.py \
-    --result_path ${REPLICA_ROOT}/${SCENE_NAME}/sg_cache/map/scene_map_cfslam_pruned.pkl.gz \
-    --edge_file ${REPLICA_ROOT}/${SCENE_NAME}/sg_cache/cfslam_object_relations.json
-```
-
-
-## AI2Thor-related experiments
-
-During the development stage, we performed some experiments on the AI2Thor dataset. 
-Upon request, now we provide the code and instructions for these experiments. 
-However, note that we didn't perform any quantitative evaluation on AI2Thor. 
-And because of domain gap, performance of ConceptGraphs may be worse than other datasets reported. 
-
-### Setup 
-
-Use our own [fork](https://github.com/georgegu1997/ai2thor), where some changes were made to record the interaction trajectories. 
-
-```bash
-cd .. # go back to the root folder CFSLAM
-git clone git@github.com:georgegu1997/ai2thor.git
-cd ai2thor
-git checkout main5.0.0
-pip install -e .
-
-# This is for the ProcThor dataset.
-pip install ai2thor-colab prior --upgrade
-```
-
-If you meet error saying `Could not load the Qt platform plugin "xcb"` later on, it probably means that is some weird issue with `opencv-python` and `opencv-python-headless`. Try uninstalling them and install one of them back. 
-
-### Generating AI2Thor datasets
-
-1. Use `$AI2THOR_DATASET_ROOT` as the directory ai2thor dataset and save it to a variable. Also set the scene used from AI2Thor. 
-
-```bash
-# Change this to run it in a different scene in AI2Thor environment
-# train_3 is a scene from the ProcThor dataset, which containing multiple rooms in one house
-SCENE_NAME=train_3
-
-# The following scripts need to be run in the conceptgraph folder
-cd ./conceptgraph
-```
-
-2. Generate a densely captured grid map for the selected scene. 
-```bash
-# Uniform sample camera locations (XY + Yaw)
-python scripts/generate_ai2thor_dataset.py --dataset_root $AI2THOR_DATASET_ROOT --scene_name $SCENE_NAME --sample_method uniform --n_sample -1 --grid_size 0.5
-# Uniform sample + randomize lighting
-python scripts/generate_ai2thor_dataset.py --dataset_root $AI2THOR_DATASET_ROOT --scene_name $SCENE_NAME --sample_method uniform --n_sample -1 --grid_size 0.5 --save_suffix randlight --randomize_lighting
-```
-
-3. Generate a human-controlled trajectory for the selected scene. (GUI and keyboard interaction needed)
-```bash
-# Interact generation and save trajectory files. 
-# This line will open up a Unity window. You can control the agent with arrow keys in the terminal window. 
-python scripts/generate_ai2thor_dataset.py --dataset_root $AI2THOR_DATASET_ROOT --scene_name $SCENE_NAME --interact
-
-# Generate observations from the saved trajectory file
-python scripts/generate_ai2thor_dataset.py --dataset_root $AI2THOR_DATASET_ROOT --scene_name $SCENE_NAME --sample_method from_file
-```
-
-4. Generate a trajectory with object randomly moved. 
-```bash
-MOVE_RATIO=0.25
-RAND_SUFFIX=mv${MOVE_RATIO}
-python scripts/generate_ai2thor_dataset.py \
-    --dataset_root $AI2THOR_DATASET_ROOT \
-    --scene_name $SCENE_NAME \
-    --interact \
-    --save_suffix $RAND_SUFFIX \
-    --randomize_move_moveable_ratio $MOVE_RATIO \
-    --randomize_move_pickupable_ratio $MOVE_RATIO
-```
+代码许可见 [LICENSE](LICENSE)。Video2Mesh、GroundingDINO、SAM2 和模型权重
+分别遵循其原仓库/模型页面的许可。

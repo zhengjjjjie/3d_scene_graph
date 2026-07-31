@@ -76,8 +76,8 @@ def read_int_environment_default(name: str, fallback: int) -> int:
         return fallback
 
 
-OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://www.autodl.art/api/v1")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.5")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "")
 OPENAI_VISION_MODEL = os.getenv("OPENAI_VISION_MODEL")
 OPENAI_TIMEOUT = read_float_environment_default("OPENAI_TIMEOUT", 120.0)
 OPENAI_MAX_RETRIES = read_int_environment_default("OPENAI_MAX_RETRIES", 0)

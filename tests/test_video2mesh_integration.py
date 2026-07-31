@@ -649,6 +649,57 @@ def test_runner_builds_exact_safe_stage_sequence(tmp_path: Path) -> None:
         )
 
 
+def test_pipeline_config_expands_portable_roots(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checked_in_config = Path("conceptgraph/configs/video2mesh_pipeline.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert "/data/" not in checked_in_config
+    assert "/data2/" not in checked_in_config
+    assert "/home/" not in checked_in_config
+
+    workspace = tmp_path / "workspace"
+    models = tmp_path / "model store"
+    runs = tmp_path / "runs"
+    envs = tmp_path / "conda" / "envs"
+    monkeypatch.setenv("CG_WORKSPACE_ROOT", str(workspace))
+    monkeypatch.setenv("CG_MODEL_ROOT", str(models))
+    monkeypatch.setenv("CG_OUTPUT_BASE", str(runs))
+    monkeypatch.setenv("CG_CONDA_ENVS_ROOT", str(envs))
+
+    config_path = tmp_path / "portable.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "paths:",
+                "  video2mesh_root: ${WORKSPACE_ROOT}/Video2Mesh",
+                "  model: ${MODEL_ROOT}/checkpoint.pt",
+                "  output_base: ${OUTPUT_BASE}",
+                "tools:",
+                "  python: ${CONDA_ENVS_ROOT}/svpp/bin/python",
+                "metadata:",
+                "  repo: ${REPO_ROOT}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_pipeline_config(config_path)
+
+    assert config["paths"]["video2mesh_root"] == str(workspace / "Video2Mesh")
+    assert config["paths"]["model"] == str(models / "checkpoint.pt")
+    assert config["paths"]["output_base"] == str(runs)
+    assert config["tools"]["python"] == str(envs / "svpp" / "bin" / "python")
+    assert Path(config["metadata"]["repo"]).name == "3d_scene_graph"
+
+    config_path.write_text("path: ${MISSING_REPRO_VARIABLE}/file\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="MISSING_REPRO_VARIABLE"):
+        load_pipeline_config(config_path)
+
+
 def test_sam2_bootstrap_dry_run_is_write_free(tmp_path: Path) -> None:
     config = load_pipeline_config(Path("conceptgraph/configs/video2mesh_pipeline.yaml"))
     dependency_root = tmp_path / "dependencies"

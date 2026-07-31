@@ -1,10 +1,19 @@
 # ConceptGraphs -> Video2Mesh integration defaults.
 #
-# The pinned Video2Mesh/GroundingDINO repositories are consumed through
-# command-line and on-disk contracts and are never edited.  This checkout uses
-# the manually provisioned SAM2 source/environment paths below.  The bootstrap
-# block retains the pinned reference versions, but is not used for this manual
-# installation.
+# This tracked configuration contains no host-specific absolute paths.
+# load_pipeline_config expands the following built-in variables:
+#   REPO_ROOT        this 3d_scene_graph checkout
+#   WORKSPACE_ROOT   parent of REPO_ROOT (override: CG_WORKSPACE_ROOT)
+#   MODEL_ROOT       REPO_ROOT/models (override: CG_MODEL_ROOT)
+#   OUTPUT_BASE      REPO_ROOT/runs (override: CG_OUTPUT_BASE)
+#   DEPENDENCY_ROOT  REPO_ROOT/.cache/video2mesh_dependencies
+#                    (override: CG_DEPENDENCY_ROOT)
+#   CONDA_ENVS_ROOT  parent of the caller's active Conda environment
+#                    (override: CG_CONDA_ENVS_ROOT)
+#   CONDA_ROOT       owning Conda installation (override: CG_CONDA_ROOT)
+#
+# External repositories and source videos are read-only inputs. Every writable
+# artifact is constrained to a new run directory below paths.output_base.
 
 versions:
   video2mesh_commit: "3ed5ece2974594c26498676e1276f168e6db8962"
@@ -12,39 +21,41 @@ versions:
   sam2_commit: "2b90b9f5ceec907a1c18123530e92e794ad901a4"
 
 paths:
-  dependency_root: /data/zhengjie/File/huggingface/video2mesh_dependencies
-  output_base: /data/zhengjie/data/concept_graphs/video2mesh_runs
-  video2mesh_root: /data/zhengjie/code/Video2Mesh
-  groundingdino_root: /data/zhengjie/code/GroundingDINO
-  sam2_source: /data/zhengjie/code/sam2
-  sam2_checkpoint: /data/zhengjie/File/sam2/checkpoints/sam2.1_hiera_tiny.pt
+  dependency_root: ${DEPENDENCY_ROOT}
+  output_base: ${OUTPUT_BASE}
+  video2mesh_root: ${WORKSPACE_ROOT}/Video2Mesh
+  groundingdino_root: ${WORKSPACE_ROOT}/GroundingDINO
+  sam2_source: ${WORKSPACE_ROOT}/sam2
+  sam2_checkpoint: ${MODEL_ROOT}/sam2/checkpoints/sam2.1_hiera_tiny.pt
 
 tools:
-  video2mesh_python: /data/zhengjie/miniconda3/envs/groundingdino/bin/python
-  groundingdino_python: /data/zhengjie/miniconda3/envs/groundingdino/bin/python
-  sam2_python: /data/zhengjie/miniconda3/envs/sam2/bin/python
-  conceptgraphs_python: /data/zhengjie/miniconda3/envs/svpp/bin/python
-  colmap_binary: /data/zhengjie/miniconda3/envs/svpp/bin/colmap
-  ffprobe: /data/zhengjie/miniconda3/envs/svpp/bin/ffprobe
+  video2mesh_python: ${CONDA_ENVS_ROOT}/groundingdino/bin/python
+  groundingdino_python: ${CONDA_ENVS_ROOT}/groundingdino/bin/python
+  sam2_python: ${CONDA_ENVS_ROOT}/sam2/bin/python
+  conceptgraphs_python: ${CONDA_ENVS_ROOT}/svpp/bin/python
+  colmap_binary: ${CONDA_ENVS_ROOT}/svpp/bin/colmap
+  ffprobe: ${CONDA_ENVS_ROOT}/svpp/bin/ffprobe
   git: git
-  conda: /data/zhengjie/miniconda3/bin/conda
+  conda: ${CONDA_ROOT}/bin/conda
 
 models:
-  groundingdino_config: /data/zhengjie/code/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py
+  groundingdino_config: ${WORKSPACE_ROOT}/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py
   groundingdino_config_sha256: 172e80017f9395668a9cb5d1b8bd9d061c0e360471c6ed673c83b69bb14399f1
-  groundingdino_checkpoint: /data/zhengjie/File/GroundingDINO/weights/groundingdino_swint_ogc.pth
+  groundingdino_checkpoint: ${MODEL_ROOT}/GroundingDINO/weights/groundingdino_swint_ogc.pth
   groundingdino_checkpoint_sha256: 3b3ca2563c77c69f651d7bd133e97139c186df06231157a64c507099c52bc799
   sam2_model_cfg: configs/sam2.1/sam2.1_hiera_t.yaml
   sam2_checkpoint_sha256: 7402e0d864fa82708a20fbd15bc84245c2f26dff0eb43a4b5b93452deb34be69
-  clip_model_path: /data/zhengjie/File/huggingface/clip-vit-base-patch16
+  clip_model_path: ${MODEL_ROOT}/huggingface/clip-vit-base-patch16
   clip_model_sha256: ec89c7b09c749a60aae3c9cd910516f24b58214a7df060b48962d14c469cfbf0
 
+# Optional isolated SAM2 bootstrap target. The documented three-environment
+# setup uses paths.sam2_source and tools.sam2_python above.
 bootstrap:
   repository: https://github.com/facebookresearch/sam2.git
-  prefix: /data/zhengjie/miniconda3/envs/sam2
-  source_dir: /data/zhengjie/code/sam2
-  checkpoint: /data/zhengjie/File/sam2/checkpoints/sam2.1_hiera_tiny.pt
-  conda_binary: /data/zhengjie/miniconda3/bin/conda
+  prefix: ${DEPENDENCY_ROOT}/sam2-env
+  source_dir: ${DEPENDENCY_ROOT}/sam2
+  checkpoint: ${DEPENDENCY_ROOT}/checkpoints/sam2.1_hiera_tiny.pt
+  conda_binary: ${CONDA_ROOT}/bin/conda
   python_version: "3.10"
   torch_version: "2.5.1"
   torchvision_version: "0.20.1"
