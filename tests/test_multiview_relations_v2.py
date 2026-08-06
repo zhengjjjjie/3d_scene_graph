@@ -10,13 +10,17 @@ from PIL import Image
 import pytest
 
 from conceptgraph.integrations.video2mesh.object_normalization import (
+    IdentityQualityConfig,
     TrackMergeConfig,
+    build_identity_quality_report,
     carve_child_masks_from_parent,
     complete_link_track_clusters,
+    inspect_identity_quality_project,
     mask_iou,
     merge_track_cluster,
     normalize_detection_manifest,
     normalize_tracks_project,
+    resolve_track_identities,
 )
 from conceptgraph.scenegraph.build_scenegraph_cfslam import (
     _compute_local_overlap_matrix,
@@ -117,6 +121,108 @@ def test_complete_link_merges_four_lamp_tracks_into_two_without_chaining() -> No
     assert sorted(len(cluster) for cluster in clusters) == [1, 2]
 
 
+def test_identity_resolution_merges_cross_label_exact_duplicate_only() -> None:
+    frames = [f"{index:06d}" for index in range(6)]
+    left = {frame: _rect(20, 10, 60, 40) for frame in frames}
+    left_jitter = {frame: _rect(20, 11, 60, 41) for frame in frames}
+    right = {frame: _rect(20, 65, 60, 95) for frame in frames}
+    tracks = [
+        _track("left_nightstand", "nightstand", left, 0.9),
+        _track("left_counter", "counter", left_jitter, 0.5),
+        _track("right_nightstand", "nightstand", right, 0.8),
+    ]
+
+    resolved, identity = resolve_track_identities(tracks)
+
+    assert len(resolved) == 2
+    left_result = next(
+        item
+        for item in resolved
+        if "left_nightstand" in item["source_object_ids"]
+    )
+    assert left_result["object_id"] == "left_nightstand"
+    assert left_result["source_object_ids"] == [
+        "left_counter",
+        "left_nightstand",
+    ]
+    assert left_result["source_labels"] == ["counter", "nightstand"]
+    assert identity["resolution"]["ok"] is True
+    assert identity["resolution"]["source_to_canonical_object_id"] == {
+        "left_counter": "left_nightstand",
+        "left_nightstand": "left_nightstand",
+        "right_nightstand": "right_nightstand",
+    }
+    assert identity["resolution"]["duplicate_clusters"][0]["merge_kinds"] == [
+        "cross_label_duplicate"
+    ]
+
+
+def test_identity_resolution_attaches_disjoint_fragments_to_full_track() -> None:
+    frames = [f"{index:06d}" for index in range(6)]
+    full = {frame: _rect(20, 10, 60, 40) for frame in frames}
+    lower_fragment = {frame: _rect(35, 10, 60, 40) for frame in frames}
+    upper_fragment = {frame: _rect(20, 10, 35, 40) for frame in frames}
+    other = {frame: _rect(20, 65, 60, 95) for frame in frames}
+    tracks = [
+        _track("left_full", "pillow", full, 0.9),
+        _track("left_lower", "pillow", lower_fragment, 0.6),
+        _track("left_upper", "pillow", upper_fragment, 0.5),
+        _track("right_full", "pillow", other, 0.8),
+    ]
+
+    resolved, identity = resolve_track_identities(
+        tracks,
+        forbidden_pairs=(("left_lower", "left_upper"),),
+    )
+
+    assert len(resolved) == 2
+    left_result = next(
+        item for item in resolved if item["object_id"] == "left_full"
+    )
+    assert left_result["source_object_ids"] == [
+        "left_full",
+        "left_lower",
+        "left_upper",
+    ]
+    assert left_result["identity_resolution"]["fragment_source_object_ids"] == [
+        "left_lower",
+        "left_upper",
+    ]
+    for frame in frames:
+        np.testing.assert_array_equal(left_result["masks"][frame], full[frame])
+    assert len(identity["resolution"]["fragment_attachments"]) == 2
+    assert identity["resolution"]["unresolved_candidates"] == []
+    assert identity["resolution"]["ok"] is True
+
+
+def test_identity_resolution_preserves_forbidden_instances_and_fails_gate() -> None:
+    frames = [f"{index:06d}" for index in range(6)]
+    propagated_failure = {
+        frame: _rect(20, 10, 60, 40)
+        for frame in frames
+    }
+    tracks = [
+        _track("left_seed", "nightstand", propagated_failure, 0.9),
+        _track("right_seed", "nightstand", propagated_failure, 0.8),
+    ]
+
+    resolved, identity = resolve_track_identities(
+        tracks,
+        forbidden_pairs=(("left_seed", "right_seed"),),
+    )
+
+    assert len(resolved) == 2
+    assert identity["resolution"]["ok"] is False
+    assert identity["resolution"]["unresolved_candidates"] == []
+    assert identity["resolution"]["forbidden_overlap_conflicts"] == [
+        {
+            "object_ids": ["left_seed", "right_seed"],
+            "median_mask_iou": 1.0,
+            "shared_nonempty_frames": 6,
+        }
+    ]
+
+
 def test_empty_masks_do_not_enter_iou_and_pillow_carve_is_fusion_only() -> None:
     empty = np.zeros((10, 10), dtype=bool)
     assert mask_iou(empty, empty) is None
@@ -169,6 +275,20 @@ def test_track_normalization_accepts_init_directory_and_writes_native_json(
     assert result["objects"]["lamp"]["valid_frame_count"] == 1
     assert type(manifest["objects"]["lamp"]["valid_frame_count"]) is int
     assert (masks_root / "2d_fusion" / "tracking_manifest.json").is_file()
+    report = build_identity_quality_report(
+        root,
+        config=IdentityQualityConfig(min_track_frames=1),
+    )
+    assert report["ok"] is True
+    assert report["summary"]["canonical_track_count"] == 1
+    written_report = inspect_identity_quality_project(
+        root,
+        config=IdentityQualityConfig(min_track_frames=1),
+    )
+    assert written_report["status"] == "identity_ready"
+    assert (
+        root / "simulator_assets" / "identity_quality_report.json"
+    ).is_file()
     with pytest.raises(FileExistsError, match="output already exists"):
         normalize_tracks_project(root)
 

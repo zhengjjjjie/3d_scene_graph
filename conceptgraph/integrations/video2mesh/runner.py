@@ -902,6 +902,17 @@ def build_stage_commands(
         "--config-json",
         json.dumps(normalization, sort_keys=True, separators=(",", ":")),
     )
+    identity_quality = dict(_get(resolved, "identity_quality", default={}))
+    fail_on_unresolved_identities = _as_bool(
+        identity_quality.pop("fail_on_unresolved", True),
+        name="identity_quality.fail_on_unresolved",
+    )
+    identity_quality_args = [
+        "--quality-config-json",
+        json.dumps(identity_quality, sort_keys=True, separators=(",", ":")),
+    ]
+    if fail_on_unresolved_identities:
+        identity_quality_args.append("--fail-on-unresolved")
     sam2_model_cfg = str(
         _get(
             resolved,
@@ -1074,6 +1085,25 @@ def build_stage_commands(
             (
                 str(root / "masks" / "2d" / "tracking_manifest.json"),
                 str(root / "masks" / "2d_fusion" / "tracking_manifest.json"),
+            ),
+        ),
+        StageCommand(
+            "identity_quality_report",
+            _conceptgraphs_command(
+                conceptgraphs_python,
+                "inspect-identities",
+                root,
+                *identity_quality_args,
+            ),
+            conceptgraphs_python,
+            str(conceptgraphs_root),
+            conceptgraphs_env,
+            (
+                str(
+                    root
+                    / "simulator_assets"
+                    / "identity_quality_report.json"
+                ),
             ),
         ),
         StageCommand(
@@ -2040,6 +2070,11 @@ def _stage_artifact_paths(
             project_root / "masks" / "2d_fusion",
             project_root / "masks" / "object_labels.json",
         ),
+        "identity_quality_report": (
+            project_root
+            / "simulator_assets"
+            / "identity_quality_report.json",
+        ),
         "mask_track_quality_report": (
             project_root / "simulator_assets" / "mask_track_quality_report.json",
         ),
@@ -2155,6 +2190,11 @@ def _stage_residual_paths(project_root: Path, stage_name: str) -> list[Path]:
         "normalize_mask_tracks": (
             project_root / "masks" / "2d",
             project_root / "masks" / "2d_fusion",
+        ),
+        "identity_quality_report": (
+            project_root
+            / "simulator_assets"
+            / "identity_quality_report.json",
         ),
         "mask_track_quality_report": (
             project_root / "simulator_assets" / "mask_track_quality_report.json",

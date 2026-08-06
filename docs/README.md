@@ -5,6 +5,8 @@
 
 补充文档：
 
+- [当前整体流程与技术设计](current_pipeline_technical_design.md)：从视频、
+  实例消歧、稀疏点级 3D mask 融合到多视角 scene graph 的当前完整实现。
 - [Video2Mesh 集成设计](video2mesh_integration.md)：阶段边界、产物契约、
   resume 安全性和混合 2D/3D 关系图。
 - [精简检测流程](archive/streamlined_detection.md)：原始 ConceptGraphs

@@ -111,6 +111,14 @@ normalization:
   min_median_iou: 0.85
   min_frame_iou: 0.75
   min_frame_iou_fraction: 0.80
+  allow_cross_label_duplicates: true
+  duplicate_min_median_iou: 0.90
+  duplicate_min_frame_iou: 0.85
+  duplicate_min_frame_iou_fraction: 0.80
+  fragment_min_median_containment: 0.95
+  fragment_min_frame_containment: 0.90
+  fragment_min_frame_containment_fraction: 0.75
+  fragment_max_median_area_ratio: 0.75
   anchor_separation_iou: 0.20
   pillow_bed_min_containment: 0.80
   pillow_bed_max_area_ratio: 0.35
@@ -138,6 +146,13 @@ quality:
   min_coverage_ratio: 0.7
   max_area_cv: 1.0
   max_center_jump_ratio: 0.35
+
+identity_quality:
+  min_track_frames: 3
+  min_coverage_ratio: 0.7
+  max_area_cv: 1.0
+  max_area_step_ratio: 4.0
+  fail_on_unresolved: true
 
 conversion:
   clip_device: auto

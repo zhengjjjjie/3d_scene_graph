@@ -47,6 +47,14 @@ class TrackMergeConfig:
     min_median_iou: float = 0.85
     min_frame_iou: float = 0.75
     min_frame_iou_fraction: float = 0.80
+    allow_cross_label_duplicates: bool = True
+    duplicate_min_median_iou: float = 0.90
+    duplicate_min_frame_iou: float = 0.85
+    duplicate_min_frame_iou_fraction: float = 0.80
+    fragment_min_median_containment: float = 0.95
+    fragment_min_frame_containment: float = 0.90
+    fragment_min_frame_containment_fraction: float = 0.75
+    fragment_max_median_area_ratio: float = 0.75
     anchor_separation_iou: float = 0.20
     max_anchor_frames_per_class: int = 2
     max_seeds_per_class: int = 8
@@ -63,11 +71,20 @@ class TrackMergeConfig:
             raise ValueError("max_seeds_per_class must be positive")
         if self.pillow_dilation_px < 0:
             raise ValueError("pillow_dilation_px must be non-negative")
+        if not isinstance(self.allow_cross_label_duplicates, bool):
+            raise ValueError("allow_cross_label_duplicates must be a boolean")
         for field in (
             "min_shorter_coverage",
             "min_median_iou",
             "min_frame_iou",
             "min_frame_iou_fraction",
+            "duplicate_min_median_iou",
+            "duplicate_min_frame_iou",
+            "duplicate_min_frame_iou_fraction",
+            "fragment_min_median_containment",
+            "fragment_min_frame_containment",
+            "fragment_min_frame_containment_fraction",
+            "fragment_max_median_area_ratio",
             "anchor_separation_iou",
             "pillow_bed_min_containment",
             "pillow_bed_max_area_ratio",
@@ -75,6 +92,24 @@ class TrackMergeConfig:
             value = float(getattr(self, field))
             if not 0.0 <= value <= 1.0:
                 raise ValueError(f"{field} must lie in [0, 1]")
+
+
+@dataclass(frozen=True)
+class IdentityQualityConfig:
+    min_track_frames: int = 3
+    min_coverage_ratio: float = 0.70
+    max_area_cv: float = 1.0
+    max_area_step_ratio: float = 4.0
+
+    def __post_init__(self) -> None:
+        if self.min_track_frames <= 0:
+            raise ValueError("min_track_frames must be positive")
+        if not 0.0 <= float(self.min_coverage_ratio) <= 1.0:
+            raise ValueError("min_coverage_ratio must lie in [0, 1]")
+        if float(self.max_area_cv) <= 0:
+            raise ValueError("max_area_cv must be positive")
+        if float(self.max_area_step_ratio) < 1:
+            raise ValueError("max_area_step_ratio must be at least 1")
 
 
 def normalize_label(value: Any) -> str:
@@ -131,11 +166,54 @@ def track_pair_metrics(
         for frame_id in shared
         if (value := mask_iou(masks_a[frame_id], masks_b[frame_id])) is not None
     ]
+    first_in_second: list[float] = []
+    second_in_first: list[float] = []
+    first_to_second_area_ratios: list[float] = []
+    first_areas: list[int] = []
+    second_areas: list[int] = []
+    for frame_id in shared:
+        first_mask = np.asarray(masks_a[frame_id], dtype=bool)
+        second_mask = np.asarray(masks_b[frame_id], dtype=bool)
+        first_area = int(first_mask.sum())
+        second_area = int(second_mask.sum())
+        if not first_area or not second_area:
+            continue
+        intersection = int(np.logical_and(first_mask, second_mask).sum())
+        first_in_second.append(float(intersection / first_area))
+        second_in_first.append(float(intersection / second_area))
+        first_to_second_area_ratios.append(float(first_area / second_area))
+        first_areas.append(first_area)
+        second_areas.append(second_area)
     shorter = min(len(valid_a), len(valid_b))
     coverage = len(shared) / shorter if shorter else 0.0
     median_iou = float(np.median(ious)) if ious else 0.0
     strong_fraction = (
         float(np.mean(np.asarray(ious) >= cfg.min_frame_iou)) if ious else 0.0
+    )
+    duplicate_strong_fraction = (
+        float(np.mean(np.asarray(ious) >= cfg.duplicate_min_frame_iou))
+        if ious
+        else 0.0
+    )
+    first_containment_fraction = (
+        float(
+            np.mean(
+                np.asarray(first_in_second)
+                >= cfg.fragment_min_frame_containment
+            )
+        )
+        if first_in_second
+        else 0.0
+    )
+    second_containment_fraction = (
+        float(
+            np.mean(
+                np.asarray(second_in_first)
+                >= cfg.fragment_min_frame_containment
+            )
+        )
+        if second_in_first
+        else 0.0
     )
     compatible = bool(
         not forbidden
@@ -149,6 +227,22 @@ def track_pair_metrics(
         "shorter_track_coverage": coverage,
         "median_mask_iou": median_iou,
         "frame_iou_at_least_threshold_fraction": strong_fraction,
+        "duplicate_frame_iou_at_least_threshold_fraction": duplicate_strong_fraction,
+        "median_first_in_second": (
+            float(np.median(first_in_second)) if first_in_second else 0.0
+        ),
+        "median_second_in_first": (
+            float(np.median(second_in_first)) if second_in_first else 0.0
+        ),
+        "first_in_second_at_least_threshold_fraction": first_containment_fraction,
+        "second_in_first_at_least_threshold_fraction": second_containment_fraction,
+        "median_first_to_second_area_ratio": (
+            float(np.median(first_to_second_area_ratios))
+            if first_to_second_area_ratios
+            else 0.0
+        ),
+        "median_first_area": float(np.median(first_areas)) if first_areas else 0.0,
+        "median_second_area": float(np.median(second_areas)) if second_areas else 0.0,
         "forbidden": bool(forbidden),
         "compatible": compatible,
     }
@@ -160,7 +254,7 @@ def complete_link_track_clusters(
     config: TrackMergeConfig | None = None,
     forbidden_pairs: Iterable[tuple[str, str]] = (),
 ) -> tuple[list[list[int]], dict[str, dict[str, Any]]]:
-    """Cluster same-label tracks without allowing transitive chain merges."""
+    """Cluster duplicate tracks without allowing transitive chain merges."""
 
     cfg = config or TrackMergeConfig()
     forbidden = {frozenset((str(a), str(b))) for a, b in forbidden_pairs}
@@ -173,15 +267,55 @@ def complete_link_track_clusters(
         id_b = str(second["object_id"])
         key = "::".join(sorted((id_a, id_b)))
         if key not in pair_metrics:
-            same_label = normalize_label(first.get("label")) == normalize_label(second.get("label"))
+            same_label = normalize_label(first.get("label")) == normalize_label(
+                second.get("label")
+            )
             metrics = track_pair_metrics(
                 first,
                 second,
                 config=cfg,
                 forbidden=frozenset((id_a, id_b)) in forbidden,
             )
+            metrics["object_ids"] = [id_a, id_b]
             metrics["same_label"] = same_label
-            metrics["compatible"] = bool(same_label and metrics["compatible"])
+            same_label_match = bool(same_label and metrics["compatible"])
+            cross_label_duplicate = bool(
+                cfg.allow_cross_label_duplicates
+                and not same_label
+                and not metrics["forbidden"]
+                and metrics["shared_nonempty_frames"]
+                >= cfg.min_shared_nonempty_frames
+                and metrics["shorter_track_coverage"]
+                >= cfg.min_shorter_coverage
+                and metrics["median_mask_iou"]
+                >= cfg.duplicate_min_median_iou
+                and metrics["duplicate_frame_iou_at_least_threshold_fraction"]
+                >= cfg.duplicate_min_frame_iou_fraction
+            )
+            forbidden_overlap_conflict = bool(
+                metrics["forbidden"]
+                and same_label
+                and metrics["shared_nonempty_frames"]
+                >= cfg.min_shared_nonempty_frames
+                and metrics["median_mask_iou"]
+                >= cfg.duplicate_min_median_iou
+            )
+            metrics["same_label_match"] = same_label_match
+            metrics["cross_label_duplicate"] = cross_label_duplicate
+            metrics["forbidden_overlap_conflict"] = forbidden_overlap_conflict
+            metrics["merge_candidate"] = bool(
+                same_label_match or cross_label_duplicate
+            )
+            metrics["merge_kind"] = (
+                "same_label_duplicate"
+                if same_label_match
+                else (
+                    "cross_label_duplicate"
+                    if cross_label_duplicate
+                    else None
+                )
+            )
+            metrics["compatible"] = metrics["merge_candidate"]
             pair_metrics[key] = metrics
         return bool(pair_metrics[key]["compatible"])
 
@@ -224,6 +358,15 @@ def _area_stability(track: Mapping[str, Any]) -> float:
     return float(np.std(areas) / mean) if mean else math.inf
 
 
+def _median_track_area(track: Mapping[str, Any]) -> float:
+    areas = [
+        int(np.asarray(mask, dtype=bool).sum())
+        for mask in (track.get("masks") or {}).values()
+        if np.asarray(mask, dtype=bool).any()
+    ]
+    return float(np.median(areas)) if areas else 0.0
+
+
 def canonical_track_index(cluster: Sequence[int], tracks: Sequence[Mapping[str, Any]]) -> int:
     def rank(index: int) -> tuple[Any, ...]:
         track = tracks[index]
@@ -245,22 +388,57 @@ def canonical_track_index(cluster: Sequence[int], tracks: Sequence[Mapping[str, 
 def merge_track_cluster(
     cluster: Sequence[int],
     tracks: Sequence[Mapping[str, Any]],
+    *,
+    canonical_index: int | None = None,
+    preserve_canonical_masks: bool = False,
 ) -> dict[str, Any]:
-    canonical_index = canonical_track_index(cluster, tracks)
+    if not cluster:
+        raise ValueError("cannot merge an empty track cluster")
+    if canonical_index is None:
+        canonical_index = canonical_track_index(cluster, tracks)
+    if canonical_index not in cluster:
+        raise ValueError("canonical_index must be a member of cluster")
     canonical = dict(tracks[canonical_index])
     merged_masks: dict[str, np.ndarray] = {}
-    for index in cluster:
+    ordered_indices = [canonical_index] + [
+        index for index in cluster if index != canonical_index
+    ]
+    for index in ordered_indices:
         for frame_id, mask in (tracks[index].get("masks") or {}).items():
             binary = np.asarray(mask, dtype=bool)
             if frame_id in merged_masks:
                 if merged_masks[frame_id].shape != binary.shape:
                     raise ValueError(f"mask shape mismatch in merged frame {frame_id}")
-                merged_masks[frame_id] = np.logical_or(merged_masks[frame_id], binary)
+                if not preserve_canonical_masks or not merged_masks[frame_id].any():
+                    merged_masks[frame_id] = np.logical_or(
+                        merged_masks[frame_id], binary
+                    )
             else:
                 merged_masks[str(frame_id)] = binary.copy()
-    source_ids = sorted(str(tracks[index]["object_id"]) for index in cluster)
+    source_ids = sorted(
+        {
+            str(source_id)
+            for index in cluster
+            for source_id in (
+                tracks[index].get("source_object_ids")
+                or [tracks[index]["object_id"]]
+            )
+        }
+    )
+    source_labels = sorted(
+        {
+            normalize_label(source_label)
+            for index in cluster
+            for source_label in (
+                tracks[index].get("source_labels")
+                or [tracks[index].get("label")]
+            )
+            if normalize_label(source_label)
+        }
+    )
     canonical["masks"] = merged_masks
     canonical["source_object_ids"] = source_ids
+    canonical["source_labels"] = source_labels
     canonical["canonical_object_id"] = str(tracks[canonical_index]["object_id"])
     canonical["object_id"] = canonical["canonical_object_id"]
     canonical["valid_frame_count"] = int(
@@ -268,6 +446,314 @@ def merge_track_cluster(
     )
     canonical["area_cv"] = _area_stability(canonical)
     return canonical
+
+
+def _track_source_ids(track: Mapping[str, Any]) -> list[str]:
+    return sorted(
+        str(value)
+        for value in (track.get("source_object_ids") or [track["object_id"]])
+    )
+
+
+def _fragment_candidate(
+    metrics: Mapping[str, Any],
+    *,
+    first_is_child: bool,
+    config: TrackMergeConfig,
+) -> dict[str, Any] | None:
+    if metrics.get("forbidden"):
+        return None
+    if (
+        int(metrics.get("shared_nonempty_frames", 0))
+        < config.min_shared_nonempty_frames
+    ):
+        return None
+    if float(metrics.get("shorter_track_coverage", 0.0)) < config.min_shorter_coverage:
+        return None
+    if first_is_child:
+        containment = float(metrics.get("median_first_in_second", 0.0))
+        containment_fraction = float(
+            metrics.get("first_in_second_at_least_threshold_fraction", 0.0)
+        )
+        area_ratio = float(metrics.get("median_first_to_second_area_ratio", 0.0))
+        child_area = float(metrics.get("median_first_area", 0.0))
+        parent_area = float(metrics.get("median_second_area", 0.0))
+    else:
+        containment = float(metrics.get("median_second_in_first", 0.0))
+        containment_fraction = float(
+            metrics.get("second_in_first_at_least_threshold_fraction", 0.0)
+        )
+        raw_ratio = float(metrics.get("median_first_to_second_area_ratio", 0.0))
+        area_ratio = float(1.0 / raw_ratio) if raw_ratio > 0 else math.inf
+        child_area = float(metrics.get("median_second_area", 0.0))
+        parent_area = float(metrics.get("median_first_area", 0.0))
+    if not (
+        child_area > 0
+        and parent_area > child_area
+        and containment >= config.fragment_min_median_containment
+        and containment_fraction
+        >= config.fragment_min_frame_containment_fraction
+        and area_ratio <= config.fragment_max_median_area_ratio
+    ):
+        return None
+    return {
+        "median_containment": containment,
+        "containment_at_least_threshold_fraction": containment_fraction,
+        "median_child_to_parent_area_ratio": area_ratio,
+        "median_child_area": child_area,
+        "median_parent_area": parent_area,
+        "shared_nonempty_frames": int(metrics["shared_nonempty_frames"]),
+        "shorter_track_coverage": float(metrics["shorter_track_coverage"]),
+    }
+
+
+def resolve_track_identities(
+    tracks: Sequence[Mapping[str, Any]],
+    *,
+    config: TrackMergeConfig | None = None,
+    forbidden_pairs: Iterable[tuple[str, str]] = (),
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Resolve exact duplicates first, then attach stable same-label fragments.
+
+    Exact duplicate clustering remains complete-link to prevent transitive
+    identity collapse. Multiple disjoint fragments may attach to a larger
+    same-label track. Every attachment is directional (strictly smaller to
+    larger), and attachment to independent parents remains unresolved.
+    """
+
+    cfg = config or TrackMergeConfig()
+    forbidden = {
+        frozenset((str(first), str(second)))
+        for first, second in forbidden_pairs
+    }
+    base_clusters, pair_metrics = complete_link_track_clusters(
+        tracks,
+        config=cfg,
+        forbidden_pairs=(tuple(pair) for pair in forbidden),
+    )
+    base_tracks = [
+        merge_track_cluster(cluster, tracks) for cluster in base_clusters
+    ]
+
+    def base_pair_is_forbidden(left: int, right: int) -> bool:
+        return any(
+            frozenset((first, second)) in forbidden
+            for first in _track_source_ids(base_tracks[left])
+            for second in _track_source_ids(base_tracks[right])
+        )
+
+    fragment_candidates: list[dict[str, Any]] = []
+    by_child: dict[int, list[dict[str, Any]]] = {}
+    for left in range(len(base_tracks)):
+        for right in range(left + 1, len(base_tracks)):
+            first = base_tracks[left]
+            second = base_tracks[right]
+            if normalize_label(first.get("label")) != normalize_label(
+                second.get("label")
+            ):
+                continue
+            metrics = track_pair_metrics(
+                first,
+                second,
+                config=cfg,
+                forbidden=base_pair_is_forbidden(left, right),
+            )
+            for child, parent, first_is_child in (
+                (left, right, True),
+                (right, left, False),
+            ):
+                fragment_metrics = _fragment_candidate(
+                    metrics,
+                    first_is_child=first_is_child,
+                    config=cfg,
+                )
+                if fragment_metrics is None:
+                    continue
+                record = {
+                    "child_base_index": child,
+                    "parent_base_index": parent,
+                    "child_object_id": str(base_tracks[child]["object_id"]),
+                    "parent_object_id": str(base_tracks[parent]["object_id"]),
+                    "child_source_object_ids": _track_source_ids(base_tracks[child]),
+                    "parent_source_object_ids": _track_source_ids(base_tracks[parent]),
+                    "label": normalize_label(base_tracks[child].get("label")),
+                    **fragment_metrics,
+                }
+                fragment_candidates.append(record)
+                by_child.setdefault(child, []).append(record)
+
+    attachments: dict[int, int] = {}
+    selected_fragment_records: list[dict[str, Any]] = []
+    for child, candidates in sorted(
+        by_child.items(),
+        key=lambda item: (
+            _median_track_area(base_tracks[item[0]]),
+            str(base_tracks[item[0]]["object_id"]),
+        ),
+    ):
+        selected = max(
+            candidates,
+            key=lambda item: (
+                item["containment_at_least_threshold_fraction"],
+                item["median_containment"],
+                item["median_parent_area"],
+                -item["median_child_to_parent_area_ratio"],
+                item["shared_nonempty_frames"],
+                item["parent_object_id"],
+            ),
+        )
+        attachments[child] = int(selected["parent_base_index"])
+        selected_fragment_records.append(dict(selected))
+
+    def root_for(index: int) -> int:
+        visited: set[int] = set()
+        current = index
+        while current in attachments:
+            if current in visited:
+                raise ValueError("fragment identity attachments contain a cycle")
+            visited.add(current)
+            current = attachments[current]
+        return current
+
+    groups: dict[int, list[int]] = {}
+    for index in range(len(base_tracks)):
+        groups.setdefault(root_for(index), []).append(index)
+
+    final_tracks: list[dict[str, Any]] = []
+    final_root_by_base: dict[int, int] = {}
+    for root, members in sorted(
+        groups.items(), key=lambda item: str(base_tracks[item[0]]["object_id"])
+    ):
+        for member in members:
+            final_root_by_base[member] = root
+        if len(members) == 1:
+            merged = dict(base_tracks[root])
+        else:
+            merged = merge_track_cluster(
+                members,
+                base_tracks,
+                canonical_index=root,
+                preserve_canonical_masks=True,
+            )
+        merged["identity_resolution"] = {
+            "canonical_object_id": str(merged["object_id"]),
+            "source_object_ids": _track_source_ids(merged),
+            "source_labels": list(merged.get("source_labels") or []),
+            "fragment_source_object_ids": sorted(
+                {
+                    source_id
+                    for member in members
+                    if member != root
+                    for source_id in _track_source_ids(base_tracks[member])
+                }
+            ),
+        }
+        final_tracks.append(merged)
+
+    source_to_base = {
+        source_id: base_index
+        for base_index, track in enumerate(base_tracks)
+        for source_id in _track_source_ids(track)
+    }
+    source_to_canonical = {
+        source_id: str(base_tracks[final_root_by_base[base_index]]["object_id"])
+        for source_id, base_index in source_to_base.items()
+    }
+
+    duplicate_clusters = []
+    for cluster, base_track in zip(base_clusters, base_tracks):
+        if len(cluster) <= 1:
+            continue
+        source_ids = sorted(str(tracks[index]["object_id"]) for index in cluster)
+        labels = sorted(
+            {
+                normalize_label(tracks[index].get("label"))
+                for index in cluster
+            }
+        )
+        kinds = sorted(
+            {
+                str(metrics["merge_kind"])
+                for metrics in pair_metrics.values()
+                if metrics.get("merge_kind")
+                and set(metrics.get("object_ids") or []).issubset(source_ids)
+            }
+        )
+        duplicate_clusters.append(
+            {
+                "canonical_object_id": str(base_track["object_id"]),
+                "source_object_ids": source_ids,
+                "source_labels": labels,
+                "merge_kinds": kinds,
+            }
+        )
+
+    unresolved_candidates = []
+    forbidden_overlap_conflicts = []
+    for metrics in pair_metrics.values():
+        first_id, second_id = [str(value) for value in metrics["object_ids"]]
+        if metrics.get("forbidden_overlap_conflict"):
+            forbidden_overlap_conflicts.append(
+                {
+                    "object_ids": [first_id, second_id],
+                    "median_mask_iou": metrics["median_mask_iou"],
+                    "shared_nonempty_frames": metrics["shared_nonempty_frames"],
+                }
+            )
+        if (
+            metrics.get("merge_candidate")
+            and source_to_canonical.get(first_id)
+            != source_to_canonical.get(second_id)
+        ):
+            unresolved_candidates.append(
+                {
+                    "kind": metrics.get("merge_kind"),
+                    "object_ids": [first_id, second_id],
+                    "median_mask_iou": metrics["median_mask_iou"],
+                    "shared_nonempty_frames": metrics["shared_nonempty_frames"],
+                }
+            )
+
+    for record in fragment_candidates:
+        child_root = final_root_by_base[int(record["child_base_index"])]
+        parent_root = final_root_by_base[int(record["parent_base_index"])]
+        record["resolved"] = child_root == parent_root
+        record["canonical_object_id"] = str(
+            base_tracks[child_root]["object_id"]
+        )
+        if not record["resolved"]:
+            unresolved_candidates.append(
+                {
+                    "kind": "same_label_fragment",
+                    "object_ids": [
+                        record["child_object_id"],
+                        record["parent_object_id"],
+                    ],
+                    "median_containment": record["median_containment"],
+                    "shared_nonempty_frames": record["shared_nonempty_frames"],
+                }
+            )
+
+    resolution = {
+        "schema_version": 1,
+        "method": "complete_link_duplicates_then_fragment_attachment",
+        "config": asdict(cfg),
+        "raw_track_count": len(tracks),
+        "base_track_count": len(base_tracks),
+        "final_track_count": len(final_tracks),
+        "duplicate_clusters": duplicate_clusters,
+        "fragment_candidates": fragment_candidates,
+        "fragment_attachments": selected_fragment_records,
+        "source_to_canonical_object_id": source_to_canonical,
+        "unresolved_candidates": unresolved_candidates,
+        "forbidden_overlap_conflicts": forbidden_overlap_conflicts,
+        "ok": not unresolved_candidates and not forbidden_overlap_conflicts,
+    }
+    return final_tracks, {
+        "pair_metrics": pair_metrics,
+        "base_clusters": base_clusters,
+        "resolution": resolution,
+    }
 
 
 def _dilate(mask: np.ndarray, pixels: int) -> np.ndarray:
@@ -692,18 +1178,23 @@ def normalize_tracks_project(
     forbidden_pairs = prompt_manifest.get("normalization", {}).get(
         "forbidden_merge_pairs", []
     )
-    clusters, pair_metrics = complete_link_track_clusters(
+    merged, identity = resolve_track_identities(
         tracks,
         config=cfg,
         forbidden_pairs=(tuple(item) for item in forbidden_pairs),
     )
-    merged = [merge_track_cluster(cluster, tracks) for cluster in clusters]
+    pair_metrics = identity["pair_metrics"]
+    identity_resolution = identity["resolution"]
 
     labels: dict[str, Any] = {}
     normalized_objects: dict[str, Any] = {}
     for track in merged:
         object_id = str(track["object_id"])
-        prompt_sources = [tracks[index]["prompt"] for index in range(len(tracks)) if tracks[index]["object_id"] in track["source_object_ids"]]
+        prompt_sources = [
+            source_track["prompt"]
+            for source_track in tracks
+            if source_track["object_id"] in track["source_object_ids"]
+        ]
         prompt = next(
             (item for item in prompt_sources if str(item.get("object_id")) == object_id),
             prompt_sources[0] if prompt_sources else {},
@@ -754,6 +1245,10 @@ def normalize_tracks_project(
             "detection_confidence": track["detection_confidence"],
             "valid_frame_count": track["valid_frame_count"],
             "area_cv": track["area_cv"],
+            "source_labels": list(track.get("source_labels") or []),
+            "identity_resolution": dict(
+                track.get("identity_resolution") or {}
+            ),
             "frames_written": len(frame_records),
             "frames": frame_records,
         }
@@ -768,6 +1263,10 @@ def normalize_tracks_project(
             "source_detection_ids": normalized_objects[object_id]["source_detection_ids"],
             "source_prompt_ids": normalized_objects[object_id]["source_prompt_ids"],
             "parent_candidate_ids": normalized_objects[object_id]["parent_candidate_ids"],
+            "source_labels": normalized_objects[object_id]["source_labels"],
+            "identity_resolution": normalized_objects[object_id][
+                "identity_resolution"
+            ],
         }
 
     # Fusion starts from exact copies of normalized masks. Pillow pixels are
@@ -817,8 +1316,8 @@ def normalize_tracks_project(
     raw_manifest_path = raw_root / "tracking_manifest.json"
     raw_manifest = _read_json(raw_manifest_path) if raw_manifest_path.is_file() else {}
     manifest = {
-        "schema_version": 2,
-        "method": "conceptgraphs_complete_link_track_normalization",
+        "schema_version": 3,
+        "method": "conceptgraphs_identity_track_normalization_v2",
         "source_mask_root": str(raw_root),
         "source_tracking_manifest_sha256": (
             hashlib.sha256(raw_manifest_path.read_bytes()).hexdigest()
@@ -831,12 +1330,14 @@ def normalize_tracks_project(
         "objects": normalized_objects,
         "clusters": [
             {
-                "canonical_object_id": merged[index]["object_id"],
-                "source_object_ids": merged[index]["source_object_ids"],
+                "canonical_object_id": track["object_id"],
+                "source_object_ids": track["source_object_ids"],
+                "source_labels": track.get("source_labels", []),
             }
-            for index in range(len(merged))
+            for track in merged
         ],
         "pair_metrics": pair_metrics,
+        "identity_resolution": identity_resolution,
         "pillow_bed_carve": carve_reports,
         "raw_tracking": {
             "method": raw_manifest.get("method"),
@@ -871,6 +1372,312 @@ def normalize_tracks_project(
         }
         _write_json_atomic(project_manifest_path, project_manifest)
     return manifest
+
+
+def _expected_frame_ids(root: Path) -> list[str]:
+    manifest_path = root / "scene" / "frames_manifest.json"
+    if manifest_path.is_file():
+        payload = _read_json(manifest_path)
+        frame_ids = [
+            str(record["frame_id"])
+            for record in payload.get("frames", [])
+            if isinstance(record, Mapping) and "frame_id" in record
+        ]
+        if frame_ids:
+            return sorted(set(frame_ids))
+    frames_root = root / "scene" / "frames"
+    return sorted(
+        path.stem
+        for path in frames_root.iterdir()
+        if path.is_file() and path.suffix.lower() in {".jpg", ".jpeg", ".png"}
+    ) if frames_root.is_dir() else []
+
+
+def build_identity_quality_report(
+    project_root: str | Path,
+    *,
+    config: IdentityQualityConfig | None = None,
+) -> dict[str, Any]:
+    """Inspect normalized identities without changing project artifacts."""
+
+    cfg = config or IdentityQualityConfig()
+    root = Path(project_root).expanduser().resolve()
+    tracking_path = root / "masks" / "2d" / "tracking_manifest.json"
+    if not tracking_path.is_file():
+        raise FileNotFoundError(
+            f"normalized tracking manifest not found: {tracking_path}"
+        )
+    manifest = _read_json(tracking_path)
+    mask_root = Path(str(manifest.get("mask_root", ""))).expanduser().resolve()
+    expected_mask_root = (root / "masks" / "2d").resolve()
+    if mask_root != expected_mask_root:
+        raise ValueError(
+            f"normalized mask_root is {mask_root}, expected {expected_mask_root}"
+        )
+
+    expected_frames = _expected_frame_ids(root)
+    expected_frame_set = set(expected_frames)
+    resolution = manifest.get("identity_resolution")
+    errors: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+    if not isinstance(resolution, Mapping):
+        errors.append(
+            {
+                "name": "missing_identity_resolution",
+                "detail": "tracking manifest has no identity_resolution record",
+            }
+        )
+        resolution = {}
+
+    unresolved = list(resolution.get("unresolved_candidates") or [])
+    forbidden_conflicts = list(
+        resolution.get("forbidden_overlap_conflicts") or []
+    )
+    for item in unresolved:
+        errors.append(
+            {
+                "name": "unresolved_identity_candidate",
+                "detail": item,
+            }
+        )
+    for item in forbidden_conflicts:
+        errors.append(
+            {
+                "name": "forbidden_overlap_conflict",
+                "detail": item,
+            }
+        )
+
+    clusters = [
+        item for item in manifest.get("clusters", []) if isinstance(item, Mapping)
+    ]
+    source_assignments: dict[str, list[str]] = {}
+    for cluster in clusters:
+        canonical = str(cluster.get("canonical_object_id", ""))
+        for source_id in cluster.get("source_object_ids") or []:
+            source_assignments.setdefault(str(source_id), []).append(canonical)
+    for source_id, canonical_ids in sorted(source_assignments.items()):
+        unique = sorted(set(canonical_ids))
+        if len(unique) > 1:
+            errors.append(
+                {
+                    "name": "source_assigned_to_multiple_instances",
+                    "detail": {
+                        "source_object_id": source_id,
+                        "canonical_object_ids": unique,
+                    },
+                }
+            )
+
+    object_reports = []
+    for object_id, record in sorted((manifest.get("objects") or {}).items()):
+        if not isinstance(record, Mapping):
+            continue
+        frame_records = [
+            item
+            for item in record.get("frames", [])
+            if isinstance(item, Mapping) and item.get("frame_id")
+        ]
+        areas: list[int] = []
+        readable_frames: list[str] = []
+        missing_files: list[str] = []
+        for frame in sorted(frame_records, key=lambda item: str(item["frame_id"])):
+            frame_id = str(frame["frame_id"])
+            mask_path = Path(
+                str(frame.get("mask") or mask_root / object_id / f"{frame_id}.png")
+            ).expanduser()
+            if not mask_path.is_file():
+                missing_files.append(str(mask_path))
+                continue
+            mask = _load_mask(mask_path)
+            area = int(mask.sum())
+            if area <= 0:
+                continue
+            areas.append(area)
+            readable_frames.append(frame_id)
+
+        covered = set(readable_frames)
+        coverage_ratio = (
+            len(covered & expected_frame_set) / len(expected_frame_set)
+            if expected_frame_set
+            else (1.0 if covered else 0.0)
+        )
+        area_mean = float(np.mean(areas)) if areas else 0.0
+        area_cv = (
+            float(np.std(areas) / area_mean) if areas and area_mean > 0 else None
+        )
+        area_step_ratios = [
+            float(max(first, second) / min(first, second))
+            for first, second in zip(areas, areas[1:])
+            if first > 0 and second > 0
+        ]
+        max_area_step_ratio = max(area_step_ratios, default=1.0)
+        issues: list[dict[str, Any]] = []
+        if missing_files:
+            issues.append(
+                {
+                    "name": "missing_mask_files",
+                    "severity": "error",
+                    "detail": missing_files[:20],
+                }
+            )
+        if not areas:
+            issues.append(
+                {
+                    "name": "empty_track",
+                    "severity": "error",
+                    "detail": "no readable non-empty normalized masks",
+                }
+            )
+        if len(covered) < cfg.min_track_frames:
+            issues.append(
+                {
+                    "name": "short_track",
+                    "severity": "warning",
+                    "detail": (
+                        f"frames={len(covered)}, minimum={cfg.min_track_frames}"
+                    ),
+                }
+            )
+        if coverage_ratio < cfg.min_coverage_ratio:
+            issues.append(
+                {
+                    "name": "low_track_coverage",
+                    "severity": "warning",
+                    "detail": (
+                        f"coverage={coverage_ratio:.3f}, "
+                        f"minimum={cfg.min_coverage_ratio:.3f}"
+                    ),
+                }
+            )
+        if area_cv is not None and area_cv > cfg.max_area_cv:
+            issues.append(
+                {
+                    "name": "unstable_mask_area",
+                    "severity": "warning",
+                    "detail": (
+                        f"area_cv={area_cv:.3f}, maximum={cfg.max_area_cv:.3f}"
+                    ),
+                }
+            )
+        if max_area_step_ratio > cfg.max_area_step_ratio:
+            issues.append(
+                {
+                    "name": "abrupt_mask_area_change",
+                    "severity": "warning",
+                    "detail": (
+                        f"max_area_step_ratio={max_area_step_ratio:.3f}, "
+                        f"maximum={cfg.max_area_step_ratio:.3f}"
+                    ),
+                }
+            )
+        source_labels = sorted(
+            {
+                normalize_label(value)
+                for value in record.get("source_labels") or []
+                if normalize_label(value)
+            }
+        )
+        if len(source_labels) > 1:
+            issues.append(
+                {
+                    "name": "cross_label_identity_merge",
+                    "severity": "warning",
+                    "detail": {
+                        "canonical_label": normalize_label(
+                            record.get("name") or record.get("category")
+                        ),
+                        "source_labels": source_labels,
+                    },
+                }
+            )
+        for issue in issues:
+            target = errors if issue["severity"] == "error" else warnings
+            target.append(
+                {
+                    "name": issue["name"],
+                    "object_id": str(object_id),
+                    "detail": issue["detail"],
+                }
+            )
+        object_reports.append(
+            {
+                "object_id": str(object_id),
+                "source_object_ids": sorted(
+                    str(value) for value in record.get("source_object_ids") or []
+                ),
+                "source_labels": source_labels,
+                "covered_frame_count": len(covered),
+                "expected_frame_count": len(expected_frames),
+                "coverage_ratio": coverage_ratio,
+                "mask_area_mean": area_mean,
+                "mask_area_cv": area_cv,
+                "max_area_step_ratio": max_area_step_ratio,
+                "issues": issues,
+            }
+        )
+
+    ok = not errors
+    return {
+        "schema_version": 1,
+        "project_root": str(root),
+        "tracking_manifest": str(tracking_path),
+        "tracking_manifest_sha256": hashlib.sha256(
+            tracking_path.read_bytes()
+        ).hexdigest(),
+        "status": "identity_ready" if ok else "unresolved_identity_conflicts",
+        "ok": ok,
+        "quality_clean": ok and not warnings,
+        "config": asdict(cfg),
+        "summary": {
+            "raw_track_count": int(resolution.get("raw_track_count", 0) or 0),
+            "canonical_track_count": len(object_reports),
+            "duplicate_cluster_count": len(
+                resolution.get("duplicate_clusters") or []
+            ),
+            "fragment_attachment_count": len(
+                resolution.get("fragment_attachments") or []
+            ),
+            "cross_label_merge_count": sum(
+                len(item.get("source_labels") or []) > 1
+                for item in object_reports
+            ),
+            "unresolved_candidate_count": len(unresolved),
+            "forbidden_overlap_conflict_count": len(forbidden_conflicts),
+            "error_count": len(errors),
+            "warning_count": len(warnings),
+        },
+        "identity_resolution": dict(resolution),
+        "objects": object_reports,
+        "errors": errors,
+        "warnings": warnings,
+    }
+
+
+def inspect_identity_quality_project(
+    project_root: str | Path,
+    *,
+    config: IdentityQualityConfig | None = None,
+) -> dict[str, Any]:
+    root = Path(project_root).expanduser().resolve()
+    report = build_identity_quality_report(root, config=config)
+    output = root / "simulator_assets" / "identity_quality_report.json"
+    _write_json_atomic(output, report)
+    project_manifest_path = root / "manifest.json"
+    if project_manifest_path.is_file():
+        project_manifest = _read_json(project_manifest_path)
+        project_manifest.setdefault("artifacts", {})[
+            "identity_quality_report"
+        ] = str(output)
+        project_manifest.setdefault("external_stages", {})[
+            "conceptgraphs_identity_quality"
+        ] = {
+            "status": report["status"],
+            "ok": report["ok"],
+            "report": str(output),
+        }
+        _write_json_atomic(project_manifest_path, project_manifest)
+    return report
 
 
 def finalize_fusion_manifest(project_root: str | Path) -> dict[str, Any]:
@@ -909,10 +1716,17 @@ def _main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "stage",
-        choices=("normalize-prompts", "normalize-tracks", "finalize-fusion"),
+        choices=(
+            "normalize-prompts",
+            "normalize-tracks",
+            "inspect-identities",
+            "finalize-fusion",
+        ),
     )
     parser.add_argument("--project-root", type=Path, required=True)
     parser.add_argument("--config-json", default="{}")
+    parser.add_argument("--quality-config-json", default="{}")
+    parser.add_argument("--fail-on-unresolved", action="store_true")
     args = parser.parse_args()
     try:
         config_value = json.loads(args.config_json)
@@ -920,14 +1734,42 @@ def _main() -> None:
         raise ValueError("--config-json must contain a JSON object") from exc
     if not isinstance(config_value, dict):
         raise ValueError("--config-json must contain a JSON object")
+    try:
+        quality_config_value = json.loads(args.quality_config_json)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            "--quality-config-json must contain a JSON object"
+        ) from exc
+    if not isinstance(quality_config_value, dict):
+        raise ValueError("--quality-config-json must contain a JSON object")
     config = TrackMergeConfig(**config_value)
+    quality_config = IdentityQualityConfig(**quality_config_value)
     if args.stage == "normalize-prompts":
         result = normalize_prompts_project(args.project_root, config=config)
     elif args.stage == "normalize-tracks":
         result = normalize_tracks_project(args.project_root, config=config)
+    elif args.stage == "inspect-identities":
+        result = inspect_identity_quality_project(
+            args.project_root,
+            config=quality_config,
+        )
     else:
         result = finalize_fusion_manifest(args.project_root)
-    print(json.dumps({"ok": True, "stage": args.stage, "sha256": canonical_sha256(result)}))
+    print(
+        json.dumps(
+            {
+                "ok": bool(result.get("ok", True)),
+                "stage": args.stage,
+                "sha256": canonical_sha256(result),
+            }
+        )
+    )
+    if (
+        args.stage == "inspect-identities"
+        and args.fail_on_unresolved
+        and not result["ok"]
+    ):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

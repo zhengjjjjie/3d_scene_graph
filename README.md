@@ -8,7 +8,8 @@
   → COLMAP 稀疏重建
   → GroundingDINO 开放词汇检测
   → SAM2 多帧实例跟踪
-  → 2D mask 归一化与 3D 融合
+  → 2D mask 实例消歧与质量门控
+  → 3D 融合
   → ConceptGraphs 对象地图
   → 多视角 2D/3D 关系图
   → scene_graph.json
@@ -262,11 +263,25 @@ Map 输出位置：
 ```text
 <output-base>/<scene-id>/<run-id>/
 ├── v2m_project/
+│   ├── masks/
+│   │   ├── 2d_raw/       # SAM2 原始轨迹，只读输入
+│   │   ├── 2d/           # 实例消歧后的观测 mask
+│   │   └── 2d_fusion/    # 仅供 3D 融合使用的 mask
+│   ├── simulator_assets/
+│   │   ├── identity_quality_report.json
+│   │   └── mask_track_quality_report.json
 │   └── logs/conceptgraphs_video2mesh/
 └── conceptgraphs/
     ├── full_pcd_video2mesh_colmap_sam2.pkl.gz
     └── full_pcd_video2mesh_colmap_sam2.conversion.json
 ```
+
+实例消歧首先以 complete-link 合并同类别重复轨迹和高置信跨类别重复轨迹，
+随后把稳定、被完整实例包含的同类别局部碎片挂接到该实例，但不会用碎片桥接
+两个相互独立的完整实例。`identity_quality_report.json` 记录原始轨迹到
+canonical instance 的映射、重复簇、碎片挂接、跨类别合并和未决冲突；未决
+身份冲突会在 3D 融合前阻断运行。覆盖率、mask 面积波动等分割质量问题保留为
+非阻断 warning，供人工复核。
 
 ## 8. 从 Map 构建 scene graph
 

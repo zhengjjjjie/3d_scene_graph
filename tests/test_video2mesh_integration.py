@@ -611,6 +611,7 @@ def test_runner_builds_exact_safe_stage_sequence(tmp_path: Path) -> None:
         "normalize_object_prompts",
         "track_masks",
         "normalize_mask_tracks",
+        "identity_quality_report",
         "mask_track_quality_report",
         "fuse_masks",
         "finalize_fusion_manifest",
@@ -629,6 +630,8 @@ def test_runner_builds_exact_safe_stage_sequence(tmp_path: Path) -> None:
     assert "object_prompts_normalized.json" in joined
     assert "masks/2d_raw" in joined
     assert "masks/2d_fusion" in joined
+    assert "inspect-identities" in joined
+    assert "--fail-on-unresolved" in joined
     run_colmap = next(command for command in commands if command.name == "run_colmap")
     wrapper_index = run_colmap.argv.index("--colmap-binary") + 1
     assert Path(run_colmap.argv[wrapper_index]) == _colmap_compat_wrapper_path()

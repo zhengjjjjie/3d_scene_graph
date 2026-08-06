@@ -10,10 +10,17 @@ backprojection front end with the following file-backed pipeline:
 4. ConceptGraphs normalizes whole-object prompts while keeping pillow, lamp,
    and nightstand instance seeds separate.
 5. SAM2 writes immutable raw tracks to `masks/2d_raw`.
-6. ConceptGraphs complete-link merges duplicate tracks into `masks/2d` and
-   writes pillow-carved, fusion-only bed masks to `masks/2d_fusion`.
-7. Video2Mesh projects the fusion masks into the sparse point cloud.
-8. The adapter converts those sets into a normal ConceptGraphs
+6. ConceptGraphs resolves identities into `masks/2d`: complete-link clustering
+   merges same-label duplicates and high-confidence cross-label duplicates,
+   then stable same-label fragments are attached to one containing full track.
+   Pillow-carved, fusion-only bed masks are written to `masks/2d_fusion`.
+7. An identity-quality gate writes
+   `simulator_assets/identity_quality_report.json` and stops before 3D fusion
+   if duplicate/fragment candidates remain unresolved or a forbidden pair
+   strongly overlaps. Coverage and mask-area stability findings remain
+   non-blocking warnings for review.
+8. Video2Mesh projects the fusion masks into the sparse point cloud.
+9. The adapter converts those sets into a normal ConceptGraphs
    `MapObjectList` pickle, including local CLIP image and text features.
 
 The Video2Mesh and GroundingDINO repositories are called as external tools;
@@ -30,9 +37,23 @@ directory:
 ```text
 <output-base>/<scene-id>/<run-id>/
 ├── v2m_project/       # Video2Mesh project and original 2D/3D mask artifacts
+│   ├── masks/
+│   │   ├── 2d_raw/   # immutable SAM2 tracks
+│   │   ├── 2d/       # identity-resolved observation masks
+│   │   └── 2d_fusion/ # fusion-only masks
+│   ├── simulator_assets/
+│   │   ├── identity_quality_report.json
+│   │   └── mask_track_quality_report.json
 │   └── logs/conceptgraphs_video2mesh/  # run manifest, stage logs and markers
 └── conceptgraphs/     # compatible MapObjectList pickle and conversion report
 ```
+
+The identity report contains the raw-to-canonical object mapping, duplicate
+clusters, fragment attachments, cross-label merges, unresolved candidates,
+per-track coverage, and mask-area diagnostics. Cross-label merges are always
+reported for audit. Identity conflicts are errors and block fusion; segmentation
+stability findings are warnings because camera motion can make image-space
+statistics noisy.
 
 An existing run directory is rejected.  `--resume` is accepted only with an
 explicit `--run-id`; completed stages are reused only when the recorded input,
